@@ -125,7 +125,7 @@ EOF
 chmod +x "$NEW_LAUNCHER"
 mv -f "$NEW_LAUNCHER" "$LAUNCHER"
 
-# 5. Automatic sync with SoFi at 7:00 am and 8:00 pm (a macOS launch agent; runs even when the app is closed).
+# 5. Automatic sync with SoFi at 7:00 am, 8:00 pm and at login (a macOS launch agent; runs even when the app is closed).
 #    If the Mac is asleep at that time, macOS runs it as soon as the Mac wakes up.
 if [ "$(uname)" = "Darwin" ]; then
   AGENT="$HOME/Library/LaunchAgents/com.amhfinance.autosync.plist"
@@ -150,6 +150,7 @@ if [ "$(uname)" = "Darwin" ]; then
   </array>
   <key>StandardOutPath</key><string>$HOME/.sofi-tracker/autosync-output.log</string>
   <key>StandardErrorPath</key><string>$HOME/.sofi-tracker/autosync-output.log</string>
+  <key>RunAtLoad</key><true/>
   <key>ProcessType</key><string>Background</string>
 </dict>
 </plist>
@@ -158,7 +159,7 @@ PLIST
     launchctl bootout "gui/$(id -u)" "$AGENT" >/dev/null 2>&1 || true
     mv -f "$NEW_AGENT" "$AGENT"
     launchctl bootstrap "gui/$(id -u)" "$AGENT" >/dev/null 2>&1 || launchctl load -w "$AGENT" >/dev/null 2>&1 || true
-    info "    Automatic SoFi sync set for 7:00 am and 8:00 pm every day."
+    info "    Automatic SoFi sync set for 7:00 am, 8:00 pm and whenever you log in."
   else
     rm -f "$NEW_AGENT"
   fi

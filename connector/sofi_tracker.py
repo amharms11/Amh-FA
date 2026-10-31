@@ -383,11 +383,16 @@ def autosync():
     if not TOKEN_FILE.exists():
         line = f"{now} skipped: SoFi is not connected yet"
     else:
-        try:
-            r = sync()
-            line = f"{now} ok: {r['added']} new, {r['modified']} updated, {r['removed']} removed"
-        except Exception as e:  # noqa: BLE001 - logged for the user
-            line = f"{now} failed: {str(e).splitlines()[0][:200] if str(e) else e.__class__.__name__}"
+        import time
+        for attempt in range(3):  # right after login or wake, Wi-Fi may need a moment
+            try:
+                r = sync()
+                line = f"{now} ok: {r['added']} new, {r['modified']} updated, {r['removed']} removed"
+                break
+            except Exception as e:  # noqa: BLE001 - logged for the user
+                line = f"{now} failed: {str(e).splitlines()[0][:200] if str(e) else e.__class__.__name__}"
+                if attempt < 2:
+                    time.sleep(30)
     DATA.mkdir(parents=True, exist_ok=True)
     lines = (AUTOSYNC_LOG.read_text().splitlines() if AUTOSYNC_LOG.exists() else [])[-199:] + [line]
     AUTOSYNC_LOG.write_text("\n".join(lines) + "\n")

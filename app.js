@@ -724,8 +724,12 @@ async function detectLocalApi() {
     if (!r.ok) return;
     localApi = await r.json();
     render();
-    // Quietly bring in anything synced since last time (e.g. by Claude Desktop), once accounts are matched.
-    if (localApi.connected && state.setup && state.accounts.some((a) => a.plaidId) && localApi.last_sync && localApi.last_sync !== state.sync?.at) {
+    const linked = localApi.connected && state.setup && state.accounts.some((a) => a.plaidId);
+    // Opening the app: if SoFi hasn't been checked in the last hour, sync now.
+    const stale = !localApi.last_sync || Date.now() - new Date(localApi.last_sync).getTime() > 60 * 60 * 1000;
+    if (linked && stale && !syncing && !detectLocalApi.didOpenSync) { detectLocalApi.didOpenSync = true; await syncNow(); return; }
+    // Quietly bring in anything synced since last time (e.g. by the 7am/8pm sync), once accounts are matched.
+    if (linked && localApi.last_sync && localApi.last_sync !== state.sync?.at) {
       const data = await (await fetch('api/export', { cache: 'no-store' })).json();
       const parsed = parsePlaidFile(data);
       if (parsed && parsed.accounts.every((a) => state.accounts.some((x) => x.plaidId === a.account_id))) { applyPlaid(parsed); save(); render(); }
@@ -763,7 +767,7 @@ function autosyncLabel() {
     const msg = rest.join(' ');
     lastText = `last ran ${isNaN(d) ? when : d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} — ${msg.startsWith('ok') ? '✓ ' + esc(msg.slice(4)) : '<span class="bad">' + esc(msg) + '</span>'}`;
   }
-  return `⏰ Automatic sync: 7:00 am & 8:00 pm daily · ${lastText}`;
+  return `⏰ Automatic sync: 7:00 am, 8:00 pm, when you log in, and when you open the app · ${lastText}`;
 }
 function syncLabel() {
   if (!state.sync) return '';
