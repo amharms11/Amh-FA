@@ -319,7 +319,12 @@ function mdLite(text) {
 const ASK_SUGGESTIONS = ['How much did I spend eating out last month?', 'Where could I cut back this month?', 'Any unusual charges lately?',
   'Am I on track with my budget?', 'What do my subscriptions cost per year?', 'How did this month compare to last month?'];
 let askBusy = false;
-function openAsk() {
+function askCard() {
+  return `<div class="card ask-card" data-askcard><div class="emoji">✨</div>
+    <div class="grow"><div class="title">Ask Claude about your money</div>
+    <div class="sub muted small">e.g. “Where could I cut back this month?”</div></div><span class="link">Ask</span></div>`;
+}
+function openAsk(initialQuestion) {
   state.chat ||= [];
   const notice = () => {
     if (!localApi) return '<div class="card small">Ask Claude works when you open AMH Finance from the <b>AMH Finance</b> icon on your Mac’s Desktop.</div>';
@@ -370,6 +375,7 @@ function openAsk() {
       } finally { askBusy = false; form.querySelector('button').disabled = false; }
     };
     form.addEventListener('submit', (e) => { e.preventDefault(); ask(input.value); });
+    if (initialQuestion) ask(initialQuestion);
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(input.value); } });
     sheet.addEventListener('click', async (e) => {
       const s = e.target.closest('[data-suggest]');
@@ -388,6 +394,7 @@ function openAsk() {
 function handleFeatureClick(e) {
   const el = (s) => e.target.closest(s);
   let n;
+  if (el('[data-askcard]')) { openAsk(); return true; }
   if ((n = el('[data-dismiss]'))) { (state.dismissed ||= {})[n.dataset.dismiss] = 1; save(); render(); return true; }
   if ((n = el('[data-rrange]'))) { state.ui.report.range = n.dataset.rrange; save(); render(); return true; }
   if ((n = el('[data-rgroup]'))) { state.ui.report.group = n.dataset.rgroup; save(); render(); return true; }

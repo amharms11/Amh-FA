@@ -901,7 +901,7 @@ function viewHome() {
   const recent = [...state.transactions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
   const trend = Array.from({ length: 6 }, (_, i) => addMonths(ym, i - 5)).map((m) => ({ label: monthLabel(m, true), value: monthTotals(m).spent, highlight: m === ym }));
 
-  return `${syncBar()}${alertsCard()}
+  return `${syncBar()}${askCard()}${alertsCard()}
   <div class="card"><h2>Spent in ${esc(monthLabel(ym, true))} <button class="link" data-goto="budgets">Budgets</button></h2>
     <div class="hero">
       <div class="ring-wrap">${ring(budget ? spent / budget : 0, budget && spent > budget ? 'var(--bad)' : budget && spent > pace ? 'var(--warn)' : 'var(--accent)')}
@@ -1072,6 +1072,7 @@ function render() {
   $('.tabbar').style.display = state.setup ? '' : 'none';
   $('#addBtn').style.visibility = state.setup ? '' : 'hidden';
   $('#askBtn').style.display = state.setup ? '' : 'none';
+  $('#askTopBtn').style.display = state.setup ? '' : 'none';
   $('#pageTitle').textContent = state.setup ? TITLES[tab] : 'AMH Finance';
   if (!state.setup) { view.innerHTML = viewWelcome(); return; }
   view.innerHTML = ({ home: viewHome, tx: viewTx, budgets: viewBudgets, recurring: viewRecurring, reports: viewReports, accounts: viewAccounts }[tab] || viewHome)();
@@ -1091,7 +1092,8 @@ document.addEventListener('DOMContentLoaded', () => {
   $('.tabbar').addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) goto(b.dataset.tab); });
   $('#addBtn').addEventListener('click', () => (state.ui.tab === 'accounts' ? accountForm() : state.ui.tab === 'recurring' ? recurringForm() : txForm()));
   $('#settingsBtn').addEventListener('click', openSettings);
-  $('#askBtn').addEventListener('click', openAsk);
+  $('#askBtn').addEventListener('click', () => openAsk());
+  $('#askTopBtn').addEventListener('click', () => openAsk());
   setTimeout(notifyDueBills, 1500);
 
   const view = $('#view');

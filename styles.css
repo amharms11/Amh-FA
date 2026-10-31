@@ -68,6 +68,14 @@ input, select, textarea { font: inherit; color: inherit; }
   backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
 }
 .topbar h1 { font-size: 17px; font-weight: 650; margin: 0; }
+.top-actions { display: flex; align-items: center; gap: 8px; }
+.ask-top {
+  height: 40px; border: 0; border-radius: 999px; padding: 0 14px; font-weight: 650; font-size: 14px;
+  background: var(--text); color: var(--bg); box-shadow: var(--shadow); white-space: nowrap;
+}
+.topbar h1 { flex: 1; text-align: center; padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 420px) { .ask-top { padding: 0 11px; font-size: 13px; } .ask-fab { display: none !important; } }
+.ask-card { display: flex; align-items: center; gap: 12px; cursor: pointer; }
 .icon-btn {
   width: 40px; height: 40px; border-radius: 50%; border: 0;
   background: var(--surface); box-shadow: var(--shadow);
