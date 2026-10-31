@@ -275,3 +275,5 @@ svg.chart text { fill: var(--muted); font-size: 10px; }
 .list li input[type=checkbox] { width: 20px; height: 20px; flex: none; accent-color: var(--accent); }
 
 .card-divider { height: 1px; background: var(--line); margin: 14px 0 12px; }
+
+.bank-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-top: 4px; }

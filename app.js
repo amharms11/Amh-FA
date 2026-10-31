@@ -609,7 +609,7 @@ function plaidAccountType(a) {
   if (t.includes('credit')) return 'credit';
   if (t.includes('loan')) return 'loan';
   if (t.includes('investment') || t.includes('brokerage')) return /401|403|457|ira|roth|retire|pension/.test(s) ? 'retirement' : 'investment';
-  if (s.includes('saving') || s.includes('money market') || s === 'cd') return 'savings';
+  if (s.includes('saving') || s.includes('money market') || s === 'cd' || /saving|vault/i.test(a.name || '')) return 'savings';
   return 'checking';
 }
 /** Accepts the SoFi Tracker export file, or its raw ~/.sofi-tracker/transactions.json store. */
