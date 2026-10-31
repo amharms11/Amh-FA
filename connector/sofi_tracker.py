@@ -18,10 +18,14 @@ import datetime as dt
 import json
 import os
 import sys
+import warnings
 import webbrowser
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+
+# Older Macs ship Python with LibreSSL; the warning it triggers is harmless noise.
+warnings.filterwarnings("ignore", message=".*OpenSSL.*")
 
 DATA = Path.home() / ".sofi-tracker"
 TOKEN_FILE = DATA / "item.json"
@@ -54,26 +58,90 @@ def load_config():
                 os.environ.setdefault(k.strip(), v.strip().strip('"'))
 
 
-def setup():
-    from getpass import getpass
-    print("To pull in your SoFi transactions automatically, paste your Plaid keys.")
-    print("Find them at https://dashboard.plaid.com  ->  Developers  ->  Keys.")
-    print("No keys yet? Just press Return to skip - you can still use the app and add this later.\n")
-    cid = input("Plaid client ID: ").strip()
-    DATA.mkdir(parents=True, exist_ok=True)
-    if not cid:
-        (DATA / ".skip").write_text("skipped bank connection\n")
-        print("Skipped. To add it later, run setup again (see README).")
-        return
-    secret = getpass("Plaid secret (it stays hidden while you paste - that's normal): ").strip()
-    env = input("Type 'sandbox' to use Plaid's test bank, or just press Return for your real bank: ").strip().lower() or "production"
-    (DATA / ".skip").unlink(missing_ok=True)
-    CONFIG_FILE.write_text(f"PLAID_CLIENT_ID={cid}\nPLAID_SECRET={secret}\nPLAID_ENV={env}\n")
+def _ask_hidden_after(prompt):
+    """Visible while pasting (less confusing than a blank prompt), then masked on screen."""
+    val = input(prompt).strip()
+    if val and sys.stdout.isatty():
+        sys.stdout.write("\033[1A\033[2K")
+        print(prompt + "\u2022" * 10 + "  (saved)")
+    return val
+
+
+def plaid_problem(exc):
+    """Turn a Plaid/network error into (code, plain-English message)."""
+    body = {}
     try:
-        os.chmod(CONFIG_FILE, 0o600)
-    except OSError:
+        body = json.loads(getattr(exc, "body", None) or "{}")
+    except (TypeError, ValueError):
         pass
-    print(f"Saved to {CONFIG_FILE}. Next: python sofi_tracker.py link")
+    code = body.get("error_code") or ""
+    if code == "INVALID_API_KEYS":
+        return code, ("Plaid didn't accept those keys. Usually the secret doesn't match the "
+                      "Sandbox/Production choice, or a key was pasted in the wrong place.")
+    if code:
+        return code, f"Plaid said: {body.get('error_message') or code}"
+    return "", f"Couldn't reach Plaid ({exc.__class__.__name__}). Check your internet connection."
+
+
+def check_keys():
+    """None if Plaid accepts the current keys, otherwise a plain-English problem."""
+    try:
+        _link_token(client())
+        return None
+    except Exception as e:  # noqa: BLE001 - shown to the user
+        return plaid_problem(e)[1]
+
+
+def setup():
+    print("To pull in your SoFi transactions automatically, enter your Plaid keys.")
+    print("Find them at https://dashboard.plaid.com  ->  Developers  ->  Keys.")
+    print("No keys yet? Just press Return to skip - the app still works without them.\n")
+    DATA.mkdir(parents=True, exist_ok=True)
+    for attempt in range(3):
+        cid = input("STEP 1 of 3 - Paste your Plaid client ID and press Return: ").strip()
+        if not cid:
+            (DATA / ".skip").write_text("skipped bank connection\n")
+            print("Skipped. Open AMH Finance and type k when you're ready to connect SoFi.")
+            return False
+
+        print("\nSTEP 2 of 3 - Which secret are you going to paste?")
+        print("   S = Sandbox    (Plaid's pretend bank - good for a first test)")
+        print("   P = Production (your real SoFi account)")
+        env = ""
+        while env not in ("sandbox", "production"):
+            ans = input("   Type the letter S or P, then press Return: ").strip().lower()
+            env = {"s": "sandbox", "sandbox": "sandbox", "p": "production", "production": "production"}.get(ans, "")
+            if not env and len(ans) > 12:
+                print("   That looks like a key. This step only needs the single letter S or P.")
+
+        secret = ""
+        while not secret:
+            secret = _ask_hidden_after(f"\nSTEP 3 of 3 - Paste your {env.title()} secret and press Return: ")
+            if secret == cid:
+                print("   That's the client ID again - copy the one labelled Secret instead.")
+                secret = ""
+            elif not secret:
+                print("   Nothing was pasted. Copy the secret from the Plaid page, then paste it here.")
+
+        (DATA / ".skip").unlink(missing_ok=True)
+        CONFIG_FILE.write_text(f"PLAID_CLIENT_ID={cid}\nPLAID_SECRET={secret}\nPLAID_ENV={env}\n")
+        try:
+            os.chmod(CONFIG_FILE, 0o600)
+        except OSError:
+            pass
+        os.environ.update(PLAID_CLIENT_ID=cid, PLAID_SECRET=secret, PLAID_ENV=env)
+
+        print("\nChecking your keys with Plaid...")
+        problem = check_keys()
+        if not problem:
+            print("\u2713 Plaid accepted your keys.")
+            return True
+        print(f"\u2717 {problem}")
+        CONFIG_FILE.unlink(missing_ok=True)
+        if attempt < 2:
+            print("Let's try again.\n")
+    print("Setup didn't finish. Open AMH Finance again any time to retry.")
+    return False
 
 
 def client():
@@ -141,15 +209,12 @@ document.getElementById('b').onclick = () => h.open();
 </script></body></html>"""
 
 
-def link():
-    import plaid
+def _link_token(c):
     from plaid.model.country_code import CountryCode
-    from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
     from plaid.model.link_token_create_request import LinkTokenCreateRequest
     from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
     from plaid.model.products import Products
 
-    c = client()
     req = LinkTokenCreateRequest(
         user=LinkTokenCreateRequestUser(client_user_id="me"),
         client_name="SoFi Tracker",
@@ -157,7 +222,23 @@ def link():
         country_codes=[CountryCode("US")],
         language="en",
     )
-    link_token = c.link_token_create(req).link_token
+    return c.link_token_create(req).link_token
+
+
+def link():
+    import plaid
+    from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
+
+    c = client()
+    try:
+        link_token = _link_token(c)
+    except Exception as e:  # noqa: BLE001
+        code, msg = plaid_problem(e)
+        print(msg)
+        if code != "INVALID_API_KEYS" or not setup():
+            raise SystemExit(1)
+        c = client()
+        link_token = _link_token(c)
     state = {"done": False}
 
     class Handler(BaseHTTPRequestHandler):
