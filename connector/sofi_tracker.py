@@ -56,11 +56,18 @@ def load_config():
 
 def setup():
     from getpass import getpass
-    print("Paste your keys from https://dashboard.plaid.com (Developers > Keys).")
-    cid = input("PLAID_CLIENT_ID: ").strip()
-    secret = getpass("PLAID_SECRET (hidden as you type): ").strip()
-    env = input("Environment - production or sandbox [production]: ").strip().lower() or "production"
+    print("To pull in your SoFi transactions automatically, paste your Plaid keys.")
+    print("Find them at https://dashboard.plaid.com  ->  Developers  ->  Keys.")
+    print("No keys yet? Just press Return to skip - you can still use the app and add this later.\n")
+    cid = input("Plaid client ID: ").strip()
     DATA.mkdir(parents=True, exist_ok=True)
+    if not cid:
+        (DATA / ".skip").write_text("skipped bank connection\n")
+        print("Skipped. To add it later, run setup again (see README).")
+        return
+    secret = getpass("Plaid secret (it stays hidden while you paste - that's normal): ").strip()
+    env = input("Type 'sandbox' to use Plaid's test bank, or just press Return for your real bank: ").strip().lower() or "production"
+    (DATA / ".skip").unlink(missing_ok=True)
     CONFIG_FILE.write_text(f"PLAID_CLIENT_ID={cid}\nPLAID_SECRET={secret}\nPLAID_ENV={env}\n")
     try:
         os.chmod(CONFIG_FILE, 0o600)
@@ -368,8 +375,13 @@ def run_app(port=APP_PORT):
         def log_message(self, *args):
             pass
 
-    server = ThreadingHTTPServer(("127.0.0.1", port), functools.partial(Handler, directory=str(APP_DIR)))
     url = f"http://localhost:{port}"
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", port), functools.partial(Handler, directory=str(APP_DIR)))
+    except OSError:  # already running (e.g. opened twice)
+        print(f"AMH Finance is already running - opening {url}")
+        webbrowser.open(url)
+        return
     print(f"AMH Finance is running at {url}  (press Ctrl+C to stop)")
     webbrowser.open(url)
     try:
