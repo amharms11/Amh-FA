@@ -3,6 +3,11 @@
 A private personal finance tracker: spending, budgets, recurring bills and subscriptions, savings goals, and net worth. It is a plain HTML/CSS/JS installable web app (PWA). It has **no server, no accounts and no tracking**. All data stays in your browser's local storage on your device.
 
 ## Features
+- **Ask Claude** (✨ button): ask questions about your money in plain English, e.g. "How much did I spend eating out last month?". It uses your Claude account through Claude Code (set it up from the Desktop launcher by typing `c`), or an Anthropic API key if you add `ANTHROPIC_API_KEY=...` to `~/.sofi-tracker/config.env`. Your question and a summary of your finances are sent to Claude to answer.
+- **Heads up**: bill reminders (1–7 days ahead, optional desktop pop-ups), budgets near or over their limit, unusual or possibly doubled charges, and accounts that may not cover this week's bills
+- **This week**: spending so far this week vs the same days last week
+- **Reports**: spending by category, store or month, for any period, with month-by-month income/spending/net and a CSV download
+- **Split transactions**: divide one purchase across several categories
 - **Home**: month-to-date spending vs. budget with pacing, net worth trend, upcoming bills, category breakdown, 6-month spending chart, recent activity
 - **Activity**: search and filter all transactions (by account, category, "needs review"); add, edit and delete them
 - **Budgets**: per-category monthly budgets with progress bars, month-by-month history, income vs. spending, savings goals with the monthly amount needed to reach each one
@@ -30,7 +35,7 @@ Open **Terminal** (press ⌘ + Space, type `Terminal`, press Return), paste this
 ```bash
 curl -fsSL https://raw.githubusercontent.com/amharms11/Amh-FA/main/install.sh | bash
 ```
-That's it. An **AMH Finance** icon appears on your Desktop: double-click it whenever you want to use the app. Running the same line again updates the app.
+That's it. An **AMH Finance** icon appears on your Desktop: double-click it whenever you want to use the app. **It updates itself every time you open it.**
 
 ## Automatic SoFi sync (purchases, deposits, balances)
 `connector/sofi_tracker.py` is a read-only Plaid connector. It can see balances and transactions but can never move money. Everything stays on your computer.

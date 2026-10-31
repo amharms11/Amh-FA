@@ -55,7 +55,7 @@ body {
   color: var(--text);
   font: 15px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif;
   min-height: 100vh;
-  padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 16px);
+  padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 72px);
 }
 button { font: inherit; color: inherit; cursor: pointer; }
 input, select, textarea { font: inherit; color: inherit; }
@@ -203,7 +203,7 @@ main { max-width: 640px; margin: 0 auto; padding: 4px 16px 0; outline: none; }
 @keyframes fade { from { opacity: 0; } }
 
 #toast {
-  position: fixed; left: 50%; bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 24px);
+  position: fixed; left: 50%; bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 78px);
   transform: translateX(-50%) translateY(20px); opacity: 0; pointer-events: none;
   background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-size: 14px; font-weight: 550;
   transition: .2s; z-index: 60; max-width: calc(100% - 32px);
@@ -223,3 +223,33 @@ svg.chart text { fill: var(--muted); font-size: 10px; }
 .pill { display: inline-block; font-size: 11px; font-weight: 650; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
 .pill.warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
 .pill.good { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); }
+
+/* Ask Claude */
+.ask-fab {
+  position: fixed; right: max(16px, calc(50% - 300px)); bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 22px); z-index: 15;
+  border: 0; border-radius: 999px; padding: 11px 16px; font-weight: 650; font-size: 14px;
+  background: var(--text); color: var(--bg); box-shadow: 0 6px 20px rgba(16, 24, 40, .18);
+}
+.chat { display: flex; flex-direction: column; gap: 8px; max-height: 52vh; overflow-y: auto; margin: 4px 0 12px; }
+.bubble { padding: 10px 13px; border-radius: 16px; max-width: 90%; font-size: 14.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.bubble p { margin: 0 0 6px; } .bubble p:last-child { margin-bottom: 0; }
+.bubble ul { margin: 4px 0 6px; padding-left: 20px; }
+.bubble.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 5px; }
+.bubble.ai { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 5px; }
+.bubble.thinking { color: var(--muted); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .5; } }
+.ask-row { display: flex; gap: 8px; align-items: flex-end; }
+.ask-row textarea { flex: 1; border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 10px 12px; font-size: 15px; resize: none; }
+.chips[style*="wrap"] { overflow: visible; }
+
+/* Splits */
+.split-row { display: grid; grid-template-columns: 1fr 110px 24px; gap: 8px; align-items: center; margin-bottom: 8px; }
+.split-row select, .split-row input { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 10px; font-size: 15px; min-width: 0; }
+
+/* Reports */
+.rtable { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.rtable th { text-align: right; color: var(--muted); font-weight: 600; font-size: 12px; padding: 6px 0; }
+.rtable th:first-child, .rtable td:first-child { text-align: left; }
+.rtable td { text-align: right; padding: 7px 0; border-top: 1px solid var(--line); }
+.tabbar button span { white-space: nowrap; }
+@media (max-width: 380px) { .tabbar button span { font-size: 10px; } }

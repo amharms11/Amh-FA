@@ -1,2 +1,2 @@
 plaid-python>=20
-mcp>=1.2
+anthropic

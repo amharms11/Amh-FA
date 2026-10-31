@@ -20,6 +20,9 @@ import os
 import sys
 import warnings
 import webbrowser
+import shutil
+import subprocess
+import tempfile
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -397,6 +400,135 @@ def export(path=None, do_sync=True) -> dict:
             "accounts": len(payload["accounts"]), "transactions": len(payload["transactions"])}
 
 
+# ---------- Ask Claude (in-app assistant) ----------
+
+CLAUDE_MODEL = "claude-opus-5-5"
+ASK_SYSTEM = """You are the money assistant inside AMH Finance, a private personal finance app.
+The user is asking about their own finances. Their data is in <financial_data>: accounts and balances,
+budgets, monthly totals, recurring bills, goals, and recent transactions (negative amounts are money out).
+
+How to answer:
+- Base every number on the data provided, and do the arithmetic carefully. If the data doesn't cover
+  the question (e.g. dates before the transactions start), say so plainly.
+- Lead with the direct answer, then brief supporting detail. Keep it short: a few sentences or a short list.
+- Use plain, friendly language - the user is not a finance expert. Format money like $1,234.56.
+- Give practical, specific suggestions when asked how to save or budget. You are not a licensed advisor;
+  for big decisions (investing, taxes, debt strategy) give useful general guidance and suggest a professional.
+- You can't move money or change anything in the app; if asked, explain how they can do it themselves."""
+
+
+def find_claude_cli():
+    for c in (shutil.which("claude"), str(Path.home() / ".local/bin/claude"),
+              "/opt/homebrew/bin/claude", "/usr/local/bin/claude"):
+        if c and os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+    return None
+
+
+def claude_backend():
+    """'api' (Anthropic API key), 'cli' (Claude Code signed in with the user's Claude account), or None."""
+    load_config()
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "api"
+    exe = find_claude_cli()
+    if not exe:
+        return None
+    try:
+        out = subprocess.run([exe, "auth", "status", "--json"], capture_output=True, text=True, timeout=15)
+        return "cli" if json.loads(out.stdout or "{}").get("loggedIn") else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def _clean_history(history):
+    """Keep the last few turns, alternating user/assistant, starting with user."""
+    turns = [{"role": h.get("role"), "text": str(h.get("text", ""))[:8000]}
+             for h in (history or []) if h.get("role") in ("user", "assistant") and h.get("text")]
+    turns = turns[-10:]
+    while turns and turns[0]["role"] != "user":
+        turns.pop(0)
+    out = []
+    for t in turns:
+        if out and out[-1]["role"] == t["role"]:
+            out[-1] = t
+        else:
+            out.append(t)
+    if out and out[-1]["role"] == "user":
+        out.pop()
+    return out
+
+
+def ask_claude(question, data, history=None):
+    question = (question or "").strip()[:4000]
+    if not question:
+        raise ValueError("Type a question first.")
+    backend = claude_backend()
+    if backend == "api":
+        return _ask_api(question, data, _clean_history(history))
+    if backend == "cli":
+        return _ask_cli(question, data, _clean_history(history))
+    raise RuntimeError("Ask Claude isn't set up yet. Close AMH Finance, open it again from your Desktop, "
+                       "and type c when asked.")
+
+
+def _ask_api(question, data, history):
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    messages = [{"role": h["role"], "content": h["text"]} for h in history]
+    messages.append({"role": "user", "content": question})
+    try:
+        resp = client.beta.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=16000,
+            system=[
+                {"type": "text", "text": ASK_SYSTEM},
+                {"type": "text", "text": f"<financial_data>\n{data}\n</financial_data>",
+                 "cache_control": {"type": "ephemeral"}},
+            ],
+            messages=messages,
+            betas=["server-side-fallback-2026-07-01"],
+            # Passed via extra_body so older SDK versions (e.g. on Python 3.9) still send them.
+            extra_body={"fallbacks": "default", "output_config": {"effort": "medium"}},
+        )
+    except anthropic.AuthenticationError:
+        raise RuntimeError("Your Anthropic API key wasn't accepted. Check ANTHROPIC_API_KEY in ~/.sofi-tracker/config.env.")
+    except anthropic.RateLimitError:
+        raise RuntimeError("Claude is busy right now (rate limit). Try again in a minute.")
+    except anthropic.APIStatusError as e:
+        raise RuntimeError(f"Claude returned an error ({e.status_code}). Try again shortly.")
+    except anthropic.APIConnectionError:
+        raise RuntimeError("Couldn't reach Claude. Check your internet connection.")
+    if resp.stop_reason == "refusal":
+        return "Sorry - I can't help with that one. Try asking in a different way."
+    text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
+    return text or "I didn't get an answer back. Please try again."
+
+
+def _ask_cli(question, data, history):
+    exe = find_claude_cli()
+    convo = "".join(f"{'User' if h['role'] == 'user' else 'Assistant'}: {h['text']}\n\n" for h in history)
+    prompt = (f"<financial_data>\n{data}\n</financial_data>\n\n"
+              + (f"Earlier in this conversation:\n{convo}" if convo else "")
+              + f"User question: {question}")
+    cmd = [exe, "-p", "--output-format", "json", "--tools", "", "--system-prompt", ASK_SYSTEM,
+           "--no-session-persistence", "--strict-mcp-config"]
+    with tempfile.TemporaryDirectory() as empty_dir:  # nothing on disk for it to look at
+        try:
+            out = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=240, cwd=empty_dir)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Claude took too long to answer. Try a shorter or simpler question.")
+    try:
+        res = json.loads(out.stdout)
+    except ValueError:
+        detail = (out.stderr or out.stdout or "").strip().splitlines()[-1:] or ["no output"]
+        raise RuntimeError(f"Claude Code didn't answer ({detail[0][:200]}). If you signed out, "
+                           "reopen AMH Finance and type c.")
+    if res.get("is_error"):
+        raise RuntimeError(f"Claude Code: {str(res.get('result') or res.get('subtype') or 'error')[:300]}")
+    return (res.get("result") or "").strip() or "I didn't get an answer back. Please try again."
+
+
 # ---------- Local app server (computer-only use) ----------
 
 def run_app(port=APP_PORT):
@@ -407,6 +539,7 @@ def run_app(port=APP_PORT):
     from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
     allowed_hosts = {f"localhost:{port}", f"127.0.0.1:{port}"}
+    state = {"claude": None}
 
     class Handler(SimpleHTTPRequestHandler):
         def _ok_request(self):
@@ -434,8 +567,11 @@ def run_app(port=APP_PORT):
             path = self.path.split("?")[0]
             if path == "/api/status":
                 store = load_store()
+                if state["claude"] is None or "refresh" in self.path:
+                    state["claude"] = claude_backend() or ""
                 return self._json({"connected": TOKEN_FILE.exists(), "last_sync": store.get("last_sync"),
-                                   "transactions": len(store.get("txns", {}))})
+                                   "transactions": len(store.get("txns", {})),
+                                   "claude": state["claude"] or None})
             if path == "/api/export":
                 return self._json(build_export(load_store()))
             if path.startswith(("/.git", "/connector", "/api")):
@@ -445,11 +581,19 @@ def run_app(port=APP_PORT):
         def do_POST(self):
             if not self._ok_request():
                 return
-            if self.path.split("?")[0] != "/api/sync" or self.headers.get("X-AMH") != "1":
+            path = self.path.split("?")[0]
+            if path not in ("/api/sync", "/api/ask") or self.headers.get("X-AMH") != "1":
                 return self.send_error(404)
             try:
-                sync()
-                self._json(build_export(load_store()))
+                if path == "/api/sync":
+                    sync()
+                    return self._json(build_export(load_store()))
+                length = int(self.headers.get("Content-Length") or 0)
+                if length > 5_000_000:
+                    return self._json({"error": "Too much data in one question."}, 413)
+                req = json.loads(self.rfile.read(length) or b"{}")
+                answer = ask_claude(req.get("question"), str(req.get("context", ""))[:1_500_000], req.get("history"))
+                return self._json({"answer": answer})
             except Exception as e:  # show the reason in the app
                 self._json({"error": str(e)}, 500)
 
@@ -540,7 +684,7 @@ def serve():
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "serve"
     if cmd == "setup":
-        setup()
+        sys.exit(0 if setup() else 1)
     elif cmd == "app":
         run_app()
     elif cmd == "link":

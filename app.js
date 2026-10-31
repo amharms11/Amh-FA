@@ -82,7 +82,10 @@ function blankState() {
     goals: [],
     rules: {},        // normalized payee -> categoryId
     snapshots: {},    // YYYY-MM-DD -> net worth
-    ui: { tab: 'home', month: monthOf(today()), txFilter: 'all', txQuery: '', theme: 'auto' },
+    dismissed: {},    // alert keys the user closed
+    chat: [],         // Ask Claude conversation
+    ui: { tab: 'home', month: monthOf(today()), txFilter: 'all', txQuery: '', theme: 'auto', remindDays: 3, notify: false,
+      report: { range: 'thisMonth', group: 'category' } },
   };
 }
 
@@ -122,21 +125,27 @@ function netWorth() {
   return { assets: round2(assets), liabilities: round2(liabilities), net: round2(assets - liabilities) };
 }
 function txInMonth(ym) { return state.transactions.filter((t) => monthOf(t.date) === ym); }
+/** A transaction's category amounts: its split parts, or the whole amount in one category. */
+const parts = (t) => (t.splits?.length ? t.splits : [{ categoryId: t.categoryId, amount: t.amount }]);
 function spendingByCategory(ym) {
   const map = {};
   for (const t of txInMonth(ym)) {
-    const c = cat(t.categoryId);
-    if (c.kind !== 'expense') continue;
-    map[c.id] = (map[c.id] || 0) - t.amount;
+    for (const p of parts(t)) {
+      const c = cat(p.categoryId);
+      if (c.kind !== 'expense') continue;
+      map[c.id] = (map[c.id] || 0) - p.amount;
+    }
   }
   return map;
 }
 function monthTotals(ym) {
   let spent = 0, income = 0;
   for (const t of txInMonth(ym)) {
-    const k = cat(t.categoryId).kind;
-    if (k === 'expense') spent -= t.amount;
-    else if (k === 'income') income += t.amount;
+    for (const p of parts(t)) {
+      const k = cat(p.categoryId).kind;
+      if (k === 'expense') spent -= p.amount;
+      else if (k === 'income') income += p.amount;
+    }
   }
   return { spent: round2(spent), income: round2(income) };
 }
@@ -293,7 +302,7 @@ function openSheet(title, html, onMount) {
 }
 
 /** Generic form sheet. fields: [{key,label,type,options,placeholder,required}] */
-function openForm({ title, fields, values = {}, onSave, onDelete, saveLabel = 'Save', extraHTML = '' }) {
+function openForm({ title, fields, values = {}, onSave, onDelete, saveLabel = 'Save', extraHTML = '', onMount }) {
   const fieldHTML = (f) => {
     const v = values[f.key] ?? f.default ?? '';
     const id = 'f_' + f.key;
@@ -334,6 +343,7 @@ function openForm({ title, fields, values = {}, onSave, onDelete, saveLabel = 'S
     });
     const del = $('[data-del]', form);
     if (del) del.addEventListener('click', () => { if (confirm('Delete this item?')) { onDelete(); save(); closeSheet(); render(); } });
+    onMount && onMount(form);
   });
 }
 
@@ -370,6 +380,9 @@ function txForm(t) {
       state.ui.lastAccount = v.accountId;
     },
     onDelete: isNew ? null : () => { state.transactions = state.transactions.filter((x) => x.id !== t.id); toast('Deleted'); },
+    extraHTML: isNew ? '' : `<button type="button" class="btn secondary" data-split style="margin-bottom:12px">${t.splits?.length
+      ? `✂️ Split into ${t.splits.length} categories — edit` : '✂️ Split across categories'}</button>`,
+    onMount: isNew ? null : (form) => $('[data-split]', form).addEventListener('click', () => { closeSheet(); splitForm(t); }),
   });
 }
 
@@ -677,6 +690,7 @@ function applyPlaid({ accounts, txns, meta }) {
     if (ex) { // keep the user's category/payee/note edits
       if (ex.date !== p.date || ex.amount !== amount || !!ex.pending !== pending) updated++;
       Object.assign(ex, { date: p.date, amount, pending, accountId: a.id });
+      fixSplits(ex);
       continue;
     }
     const dup = state.transactions.find((t) => !t.extId && t.accountId === a.id && t.date === p.date && t.amount === amount);
@@ -752,6 +766,18 @@ function openSettings() {
       <div class="btn-row"><button class="btn secondary" data-a="excsv">Export transactions CSV</button></div>
       <p class="muted small">Your data is stored only on this device, in this browser. Back up regularly — clearing Safari website data erases it.</p>
     </div>
+    <div class="card"><h2>Bill reminders</h2>
+      <p class="muted small" style="margin-top:0">Show bills on Home this many days before they’re due:</p>
+      <div class="segmented" data-remind-seg>${[1, 3, 5, 7].map((d) => `<button data-v="${d}" class="${(state.ui.remindDays ?? 3) === d ? 'on' : ''}">${d} day${d > 1 ? 's' : ''}</button>`).join('')}</div>
+      <div class="btn-row"><button class="btn secondary" data-a="notify">${state.ui.notify ? '🔔 Desktop pop-up reminders: On' : '🔕 Desktop pop-up reminders: Off'}</button></div>
+      <p class="muted small">Pop-ups appear when AMH Finance is open.</p>
+    </div>
+    <div class="card"><h2>Ask Claude</h2>
+      <p class="small" style="margin-top:0">${!localApi ? 'Available when you open AMH Finance from the Desktop icon on your Mac.'
+        : localApi.claude ? `✓ Ready (${localApi.claude === 'api' ? 'using your Anthropic API key' : 'using your Claude account'})`
+        : 'Not set up. Close the small AMH Finance window, open AMH Finance from your Desktop and type <b>c</b>.'}</p>
+      <button class="btn secondary" data-a="askopen">Open Ask Claude</button>
+    </div>
     <div class="card"><h2>Appearance</h2>
       <div class="segmented" data-theme-seg>${['auto', 'light', 'dark'].map((t) => `<button data-v="${t}" class="${state.ui.theme === t ? 'on' : ''}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div>
     </div>
@@ -763,6 +789,11 @@ function openSettings() {
       <button class="btn danger" data-a="reset">Erase all data</button>
     </div>
     <p class="muted small" style="text-align:center">AMH Finance · offline · private</p>`, (sheet) => {
+    $('[data-remind-seg]', sheet).addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      state.ui.remindDays = +b.dataset.v; save(); render();
+      $$('[data-remind-seg] button', sheet).forEach((x) => x.classList.toggle('on', x === b));
+    });
     $('[data-theme-seg]', sheet).addEventListener('click', (e) => {
       const b = e.target.closest('button'); if (!b) return;
       state.ui.theme = b.dataset.v; applyTheme(); save();
@@ -776,7 +807,7 @@ function openSettings() {
       if (a === 'export') download(`amh-finance-backup-${today()}.json`, JSON.stringify(state, null, 1), 'application/json');
       if (a === 'excsv') {
         const lines = [['Date', 'Payee', 'Amount', 'Category', 'Account', 'Note']].concat(
-          [...state.transactions].sort((x, y) => y.date.localeCompare(x.date)).map((t) => [t.date, t.payee, t.amount, cat(t.categoryId).name, acct(t.accountId)?.name || '', t.note || '']));
+          [...state.transactions].sort((x, y) => y.date.localeCompare(x.date)).map((t) => [t.date, t.payee, t.amount, t.splits?.length ? t.splits.map((p) => `${cat(p.categoryId).name} ${p.amount}`).join(' + ') : cat(t.categoryId).name, acct(t.accountId)?.name || '', t.note || '']));
         download(`transactions-${today()}.csv`, lines.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n'), 'text/csv');
       }
       if (a === 'restore') pickFile('.json,application/json', (txt) => {
@@ -790,6 +821,16 @@ function openSettings() {
         } catch { toast('Not a valid backup file'); }
       });
       if (a === 'newcat') { closeSheet(); newCategoryForm(); }
+      if (a === 'askopen') { closeSheet(); openAsk(); }
+      if (a === 'notify') {
+        if (state.ui.notify) { state.ui.notify = false; save(); closeSheet(); openSettings(); return; }
+        if (!('Notification' in window)) { toast('This browser can’t show pop-ups'); return; }
+        Notification.requestPermission().then((perm) => {
+          state.ui.notify = perm === 'granted'; save();
+          toast(perm === 'granted' ? 'Reminders on' : 'Pop-ups were blocked — allow them in your browser settings');
+          closeSheet(); openSettings(); notifyDueBills();
+        });
+      }
       if (a === 'rules') { closeSheet(); openRules(); }
       if (a === 'reset' && confirm('Erase everything? This cannot be undone.') && confirm('Really erase all data?')) {
         localStorage.removeItem(STORE_KEY); state = blankState(); closeSheet(); render(); toast('All data erased');
@@ -818,8 +859,9 @@ function openRules() {
 // ---------- Views ----------
 const txRow = (t) => {
   const c = cat(t.categoryId), a = acct(t.accountId);
-  return `<li data-tx="${t.id}"><div class="emoji">${esc(c.emoji)}</div>
-    <div class="grow"><div class="title ellipsis">${esc(t.payee)}</div><div class="sub ellipsis">${esc(c.name)}${a ? ' · ' + esc(a.name) : ''}${t.pending ? ' · <span class="pill warn">Pending</span>' : ''}${t.note ? ' · ' + esc(t.note) : ''}</div></div>
+  const catLabel = t.splits?.length ? '✂️ ' + t.splits.map((p) => cat(p.categoryId).name).join(' + ') : c.name;
+  return `<li data-tx="${t.id}"><div class="emoji">${esc(t.splits?.length ? '✂️' : c.emoji)}</div>
+    <div class="grow"><div class="title ellipsis">${esc(t.payee)}</div><div class="sub ellipsis">${esc(catLabel)}${a ? ' · ' + esc(a.name) : ''}${t.pending ? ' · <span class="pill warn">Pending</span>' : ''}${t.note ? ' · ' + esc(t.note) : ''}</div></div>
     <div class="num ${t.amount > 0 ? 'good' : ''}">${t.amount > 0 ? '+' : ''}${money(Math.abs(t.amount))}</div></li>`;
 };
 
@@ -844,7 +886,8 @@ function viewHome() {
   const nw = netWorth();
   const snaps = Object.entries(state.snapshots).sort().slice(-60).map(([date, value]) => ({ date, value }));
   const prevM = addMonths(ym, -1);
-  const prevSpentSameDay = txInMonth(prevM).filter((t) => +t.date.slice(8) <= day && cat(t.categoryId).kind === 'expense').reduce((s, t) => s - t.amount, 0);
+  const prevSpentSameDay = txInMonth(prevM).filter((t) => +t.date.slice(8) <= day)
+    .reduce((s, t) => s - parts(t).reduce((x, p) => x + (cat(p.categoryId).kind === 'expense' ? p.amount : 0), 0), 0);
 
   const upcoming = [];
   for (const r of state.recurrings) { const d = nextDue(r); if (d && d <= addDays(today(), 10)) upcoming.push({ r, d }); }
@@ -858,7 +901,7 @@ function viewHome() {
   const recent = [...state.transactions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
   const trend = Array.from({ length: 6 }, (_, i) => addMonths(ym, i - 5)).map((m) => ({ label: monthLabel(m, true), value: monthTotals(m).spent, highlight: m === ym }));
 
-  return `${syncBar()}
+  return `${syncBar()}${alertsCard()}
   <div class="card"><h2>Spent in ${esc(monthLabel(ym, true))} <button class="link" data-goto="budgets">Budgets</button></h2>
     <div class="hero">
       <div class="ring-wrap">${ring(budget ? spent / budget : 0, budget && spent > budget ? 'var(--bad)' : budget && spent > pace ? 'var(--warn)' : 'var(--accent)')}
@@ -872,6 +915,8 @@ function viewHome() {
     </div>
     <div class="spread small" style="margin-top:12px"><span class="muted">Income this month</span><span class="num good">${money(income)}</span></div>
   </div>
+
+  ${weeklyCard()}
 
   ${state.accounts.length ? `<div class="card" data-goto="accounts" style="cursor:pointer"><h2>Net worth <span class="link">Details</span></h2>
     <div class="mid">${money(nw.net)}</div>${line(snaps, 70)}</div>` : `<div class="card"><h2>Net worth</h2><p class="muted small">Add your accounts to see net worth.</p><button class="btn secondary small" data-a="addacct">Add account</button></div>`}
@@ -901,7 +946,7 @@ function viewTx() {
   else if (f === 'income') list = list.filter((t) => t.amount > 0 && cat(t.categoryId).kind !== 'transfer');
   else if (f === 'out') list = list.filter((t) => t.amount < 0 && cat(t.categoryId).kind !== 'transfer');
   else if (f === 'pending') list = list.filter((t) => t.pending);
-  else if (f.startsWith('c:')) list = list.filter((t) => t.categoryId === f.slice(2));
+  else if (f.startsWith('c:')) list = list.filter((t) => parts(t).some((p) => p.categoryId === f.slice(2)));
   else if (f.startsWith('a:')) list = list.filter((t) => t.accountId === f.slice(2));
   if (q) list = list.filter((t) => (t.payee + ' ' + (t.note || '') + ' ' + cat(t.categoryId).name).toLowerCase().includes(q) || String(Math.abs(t.amount)).includes(q));
   const shown = list.slice(0, 400);
@@ -1019,16 +1064,17 @@ function viewAccounts() {
 }
 
 // ---------- Render & events ----------
-const TITLES = { home: 'Home', tx: 'Activity', budgets: 'Budgets', recurring: 'Recurring', accounts: 'Net worth' };
+const TITLES = { home: 'Home', tx: 'Activity', budgets: 'Budgets', recurring: 'Recurring', reports: 'Reports', accounts: 'Net worth' };
 function render() {
   const view = $('#view');
   const tab = state.ui.tab;
   $$('.tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   $('.tabbar').style.display = state.setup ? '' : 'none';
   $('#addBtn').style.visibility = state.setup ? '' : 'hidden';
+  $('#askBtn').style.display = state.setup ? '' : 'none';
   $('#pageTitle').textContent = state.setup ? TITLES[tab] : 'AMH Finance';
   if (!state.setup) { view.innerHTML = viewWelcome(); return; }
-  view.innerHTML = { home: viewHome, tx: viewTx, budgets: viewBudgets, recurring: viewRecurring, accounts: viewAccounts }[tab]();
+  view.innerHTML = ({ home: viewHome, tx: viewTx, budgets: viewBudgets, recurring: viewRecurring, reports: viewReports, accounts: viewAccounts }[tab] || viewHome)();
 }
 function goto(tab) { state.ui.tab = tab; render(); window.scrollTo({ top: 0 }); }
 
@@ -1045,11 +1091,14 @@ document.addEventListener('DOMContentLoaded', () => {
   $('.tabbar').addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) goto(b.dataset.tab); });
   $('#addBtn').addEventListener('click', () => (state.ui.tab === 'accounts' ? accountForm() : state.ui.tab === 'recurring' ? recurringForm() : txForm()));
   $('#settingsBtn').addEventListener('click', openSettings);
+  $('#askBtn').addEventListener('click', openAsk);
+  setTimeout(notifyDueBills, 1500);
 
   const view = $('#view');
   view.addEventListener('click', (e) => {
     const el = (s) => e.target.closest(s);
     let n;
+    if (handleFeatureClick(e)) return;
     if ((n = el('[data-a]'))) {
       const a = n.dataset.a;
       if (a === 'start') { state.setup = true; save(); render(); accountForm(); }
@@ -1145,6 +1194,12 @@ function loadDemo() {
   ].map(([name, emoji, amount, cname, accountId, day]) => ({
     id: uid(), name, emoji, amount, freq: 'monthly', start: `${start}-${pad(day)}`, categoryId: C(cname), accountId,
   }));
+
+  const costco = state.transactions.find((t) => t.payee === 'Costco' && t.amount < -60);
+  if (costco) {
+    const g = round2(costco.amount * 0.7);
+    costco.splits = [{ categoryId: C('Groceries'), amount: g }, { categoryId: C('Shopping'), amount: round2(costco.amount - g) }];
+  }
 
   state.goals = [
     { id: uid(), name: 'Emergency fund', emoji: '🛟', target: 20000, saved: 12500, by: addDays(today(), 300) },
