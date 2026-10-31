@@ -441,6 +441,55 @@ function billsContext() {
   return L.join('\n');
 }
 
+// ---------- Home: checking balance ----------
+function checkingCard() {
+  const accts = state.accounts.filter((a) => a.type === 'checking' && !a.hidden);
+  if (!accts.length) return '';
+  const total = round2(accts.reduce((s, a) => s + accountBalance(a), 0));
+  const avail = accts.every((a) => a.available != null) ? round2(accts.reduce((s, a) => s + a.available, 0)) : null;
+  // What's left after bills due before the next payday (if the paycheck is set up).
+  let after = '';
+  const p = state.paycheck;
+  if (p?.amount) {
+    const next = paydays(p, addDays(today(), 1), addDays(today(), 40))[0];
+    if (next) {
+      const due = billsDueBetween(today(), addDays(next, -1));
+      const dueTotal = round2(due.reduce((s, b) => s + b.amount, 0));
+      const leftAfter = round2((avail ?? total) - dueTotal);
+      after = `<div class="small" style="margin-top:6px">${due.length ? `${money(dueTotal)} in bills due before payday (${esc(shortDate(next))}) → <b class="${leftAfter >= 0 ? 'good' : 'bad'}">${money(leftAfter)} left</b>` : `No bills due before payday (${esc(shortDate(next))})`}</div>`;
+    }
+  }
+  return `<div class="card" data-goto="accounts" style="cursor:pointer">
+    <div class="spread"><div class="muted small">🏦 Checking</div><span class="small muted">${state.sync ? esc(syncLabel().replace(/^.*data from /, 'Updated ')) : ''}</span></div>
+    <div class="big">${money(total)}</div>
+    ${avail != null && Math.abs(avail - total) >= 0.01 ? `<div class="small muted">Available now: <b style="color:var(--text)">${money(avail)}</b> (pending charges not yet posted)</div>` : ''}
+    ${accts.length > 1 ? `<div class="small muted">${accts.map((a) => `${esc(a.name)} ${money(accountBalance(a))}`).join(' · ')}</div>` : ''}
+    ${after}
+  </div>`;
+}
+
+// ---------- One-time data updates ----------
+function runMigrations() {
+  const m = (state.migrations ||= {});
+  if (!m.loansCategory) {
+    // "Other" becomes "Loans"; a fresh "Other" stays as the catch-all for anything unrecognized.
+    let loans = state.categories.find((c) => c.name === 'Loans');
+    const other = state.categories.find((c) => c.name === 'Other');
+    if (!loans && other) { other.name = 'Loans'; other.emoji = '🏦'; loans = other; }
+    if (!loans) { loans = { id: uid(), name: 'Loans', emoji: '🏦', kind: 'expense', budget: 0 }; state.categories.push(loans); }
+    if (!state.categories.some((c) => c.name === 'Other')) state.categories.push({ id: uid(), name: 'Other', emoji: '📦', kind: 'expense', budget: 0 });
+    // Loan payments that were filed as transfers (and loan bills) move to Loans. Credit-card payments stay transfers.
+    const transfer = state.categories.find((c) => c.name === 'Transfer');
+    const isLoan = (text, pc = '') => (/^LOAN_PAYMENTS/.test(pc) && !/CREDIT_CARD/.test(pc)) || (LOAN_RE.test(normPayee(text) + ' ') && !CARD_PAYMENT_RE.test(normPayee(text)));
+    if (transfer) {
+      state.transactions.forEach((t) => { if (t.categoryId === transfer.id && t.amount < 0 && isLoan(t.payee, t.plaidCat)) t.categoryId = loans.id; });
+      state.recurrings.forEach((r) => { if (r.categoryId === transfer.id && isLoan(`${r.name} ${r.match || ''}`)) r.categoryId = loans.id; });
+    }
+    m.loansCategory = true;
+    save();
+  }
+}
+
 // ---------- Paste a bill list ----------
 // One bill per line:  Name | Amount | Repeats | Next due | Category | Paid from | Match words
 // Amount may end in "varies". Next due: a date (2026-11-06), a day of the month (9, or "11, 27" for

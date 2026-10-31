@@ -38,7 +38,7 @@ const CHART_COLORS = ['#2f6bff', '#14a36b', '#e39a12', '#a35bff', '#e5484d', '#0
 const DEFAULT_CATEGORIES = [
   ['Groceries', '🛒', 600], ['Dining', '🍔', 300], ['Transport', '🚗', 250], ['Shopping', '🛍️', 250],
   ['Bills & Utilities', '💡', 300], ['Housing', '🏠', 0], ['Subscriptions', '🔁', 80], ['Entertainment', '🎬', 100],
-  ['Health', '💊', 100], ['Travel', '✈️', 0], ['Personal Care', '💈', 60], ['Gifts & Donations', '🎁', 50], ['Other', '📦', 0],
+  ['Health', '💊', 100], ['Travel', '✈️', 0], ['Personal Care', '💈', 60], ['Gifts & Donations', '🎁', 50], ['Loans', '🏦', 0], ['Other', '📦', 0],
 ].map(([name, emoji, budget]) => ({ id: uid(), name, emoji, budget, kind: 'expense' }))
   .concat([
     { id: uid(), name: 'Income', emoji: '💰', budget: 0, kind: 'income' },
@@ -589,7 +589,8 @@ const PLAID_CATEGORY_MAP = [
   [/^MEDICAL|^PERSONAL_CARE_GYMS/, 'Health'], [/^PERSONAL_CARE/, 'Personal Care'],
   [/^GOVERNMENT_AND_NON_PROFIT_DONATIONS/, 'Gifts & Donations'],
   [/^INCOME|^TRANSFER_IN_DEPOSIT/, 'Income'],
-  [/^TRANSFER_IN|^TRANSFER_OUT|^LOAN_PAYMENTS/, 'Transfer'],
+  [/^LOAN_PAYMENTS_CREDIT_CARD/, 'Transfer'], [/^LOAN_PAYMENTS/, 'Loans'],
+  [/^TRANSFER_IN|^TRANSFER_OUT/, 'Transfer'],
   [/^BANK_FEES|^GENERAL_SERVICES/, 'Bills & Utilities'],
 ];
 function categorizePlaid(payee, p) {
@@ -687,6 +688,7 @@ function applyPlaid({ accounts, txns, meta }) {
     const desired = ACCOUNT_TYPES[a.type]?.liability ? -Math.abs(pa.current) : Number(pa.current);
     const txSum = state.transactions.reduce((s, t) => (t.accountId === a.id ? s + t.amount : s), 0);
     a.opening = round2(desired - txSum);
+    a.available = pa.available == null ? null : Number(pa.available);
   }
   state.sync = { source: meta.source || 'SoFi', at: meta.last_sync || meta.exported_at || new Date().toISOString(), imported: new Date().toISOString(), added, updated, removed };
   toast(`Synced: ${added} new, ${updated} updated${removed ? `, ${removed} removed` : ''}`);
@@ -899,7 +901,7 @@ function viewHome() {
   const recent = [...state.transactions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
   const trend = Array.from({ length: 6 }, (_, i) => addMonths(ym, i - 5)).map((m) => ({ label: monthLabel(m, true), value: monthTotals(m).spent, highlight: m === ym }));
 
-  return `${syncBar()}${askCard()}${alertsCard()}
+  return `${checkingCard()}${syncBar()}${askCard()}${alertsCard()}
   <div class="card"><h2>Spent in ${esc(monthLabel(ym, true))} <button class="link" data-goto="budgets">Budgets</button></h2>
     <div class="hero">
       <div class="ring-wrap">${ring(budget ? spent / budget : 0, budget && spent > budget ? 'var(--bad)' : budget && spent > pace ? 'var(--warn)' : 'var(--accent)')}
@@ -1084,6 +1086,7 @@ function applyTheme() {
 
 document.addEventListener('DOMContentLoaded', () => {
   applyTheme();
+  runMigrations();
   render();
   detectLocalApi();
   setInterval(() => { if (localApi && !document.hidden) detectLocalApi(); }, 10 * 60 * 1000); // pick up background syncs
