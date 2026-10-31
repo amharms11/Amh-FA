@@ -452,7 +452,20 @@ function checkingCard() {
 
   const savings = state.accounts.filter((a) => a.type === 'savings' && !a.hidden);
   const savTotal = round2(savings.reduce((s, a) => s + accountBalance(a), 0));
-  const list = (arr) => arr.length > 1 ? `<div class="small muted">${arr.map((a) => `${esc(a.name)} ${money(accountBalance(a))}`).join('<br>')}</div>` : '';
+  const open = (state.ui.bankOpen ||= {});
+  const group = (key, label, arr, sum, extra = '') => {
+    if (!arr.length) return '';
+    const isOpen = !!open[key];
+    return `<div class="bank-row">
+      <button class="bank-head" data-bankgroup="${key}" aria-expanded="${isOpen}">
+        <span class="grow" style="text-align:left"><span class="small muted">${label}</span>
+          ${extra}</span>
+        <span class="mid ${key === 'savings' ? 'good' : ''}">${money(sum)}</span>
+        <span class="chev ${isOpen ? 'open' : ''}" aria-hidden="true">›</span>
+      </button>
+      ${isOpen ? `<ul class="bank-list">${arr.map((a) => `<li data-acct="${a.id}"><span class="grow ellipsis">${esc(a.name)}</span><span class="num">${money(accountBalance(a))}</span></li>`).join('')}</ul>` : ''}
+    </div>`;
+  };
   let checkingHTML = '';
   if (accts.length || savings.length) {
     // What's left in checking after bills due before the next payday (if the paycheck is set up).
@@ -465,13 +478,11 @@ function checkingCard() {
       const leftAfter = round2((avail ?? total) - dueTotal);
       after = `<div class="small" style="margin-top:8px">${due.length ? `${money(dueTotal)} in bills due before payday (${esc(shortDate(next))}) → checking <b class="${leftAfter >= 0 ? 'good' : 'bad'}">${money(leftAfter)} left</b>` : `No bills due before payday (${esc(shortDate(next))})`}</div>`;
     }
+    const countLabel = (arr, word) => `<span class="small muted"> · ${arr.length} ${word}${arr.length === 1 ? '' : 's'}</span>`;
     checkingHTML = `<div class="spread"><div class="muted small">🏦 Bank accounts</div><span class="small muted">${updated}</span></div>
-      <div class="bank-split">
-        ${accts.length ? `<div><div class="small muted">Checking</div><div class="mid">${money(total)}</div>
-          ${avail != null && Math.abs(avail - total) >= 0.01 ? `<div class="small muted">Available: <b style="color:var(--text)">${money(avail)}</b></div>` : ''}${list(accts)}</div>` : ''}
-        ${savings.length ? `<div><div class="small muted">Savings</div><div class="mid good">${money(savTotal)}</div>${list(savings)}</div>` : ''}
-      </div>
-      ${accts.length && savings.length ? `<div class="small muted" style="margin-top:6px">Total in the bank: <b style="color:var(--text)">${money(total + savTotal)}</b></div>` : ''}
+      ${group('checking', 'Checking', accts, total, (avail != null && Math.abs(avail - total) >= 0.01 ? `<br><span class="small muted">Available ${money(avail)}</span>` : '') + (accts.length > 1 ? countLabel(accts, 'account') : ''))}
+      ${group('savings', 'Savings', savings, savTotal, savings.length > 1 ? countLabel(savings, 'account/vault').replace('account/vaults', 'accounts & vaults') : '')}
+      ${accts.length && savings.length ? `<div class="spread small" style="margin-top:6px"><span class="muted">Total in the bank</span><b class="num">${money(total + savTotal)}</b></div>` : ''}
       ${after}`;
   }
 
@@ -612,6 +623,8 @@ function openPasteBills() {
 }
 
 function handleBillsClick(e) {
+  const bg = e.target.closest('[data-bankgroup]');
+  if (bg) { const k = bg.dataset.bankgroup; (state.ui.bankOpen ||= {})[k] = !state.ui.bankOpen[k]; save(); render(); return true; }
   const ms = e.target.closest('[data-method-seg] button');
   if (ms && state.paycheck) { state.paycheck.method = ms.dataset.v; save(); render(); return true; }
   const ig = e.target.closest('[data-ignoresugg]');
