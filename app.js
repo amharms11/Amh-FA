@@ -989,7 +989,8 @@ function viewBudgets() {
     const cls = !b ? '' : pct > 1 ? 'over' : pct > frac + 0.1 ? 'near' : 'good';
     return `<li data-cat="${c.id}" style="flex-wrap:wrap"><div class="emoji">${esc(c.emoji)}</div>
       <div class="grow"><div class="spread"><span class="title ellipsis">${esc(c.name)}</span><span class="num small">${money(spent, true)}${b ? ` <span class="muted">/ ${money(b, true)}</span>` : ''}</span></div>
-      ${b ? `<div class="bar ${cls}"><i style="width:${Math.min(100, pct * 100)}%"></i></div><div class="sub">${spent > b ? `<span class="bad">${money(spent - b, true)} over</span>` : `${money(b - spent, true)} left`}</div>` : '<div class="sub">No budget — tap to set</div>'}</div></li>`;
+      ${b ? `<div class="bar ${cls}"><i style="width:${Math.min(100, pct * 100)}%"></i></div><div class="sub">${spent > b ? `<span class="bad">${money(spent - b, true)} over</span>` : `${money(b - spent, true)} left`}</div>` : '<div class="sub">No budget — tap to set</div>'}
+      ${categoryBillsHTML(c, ym)}</div></li>`;
   };
   const goals = state.goals;
   return `

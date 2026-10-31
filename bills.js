@@ -502,6 +502,34 @@ function checkingCard() {
   return `<div class="card" data-goto="accounts" style="cursor:pointer">${checkingHTML}${cardsHTML}</div>`;
 }
 
+// ---------- Budgets tab: bills inside each category ----------
+function categoryBillsHTML(c, ym) {
+  const bills = state.recurrings.filter((r) => r.categoryId === c.id);
+  if (!bills.length) return '';
+  const open = !!(state.ui.catBillsOpen || {})[c.id];
+  const monthly = bills.reduce((s, r) => s + monthlyEquivalent(r), 0);
+  const b = +c.budget || 0, t0 = today();
+  let rows = '';
+  if (open) {
+    const items = [];
+    for (const r of bills) {
+      const dates = occurrencesInMonth(r, ym);
+      if (!dates.length) { items.push({ r, date: nextDue(r), amount: r.amount, status: 'later' }); continue; }
+      for (const d of dates) {
+        const paid = findPayment(r, d);
+        items.push({ r, date: d, amount: paid ? Math.abs(paid.amount) : r.amount, status: paid ? 'paid' : d < t0 ? 'late' : 'due' });
+      }
+    }
+    items.sort((x, y) => String(x.date).localeCompare(String(y.date)));
+    const pill = { paid: '<span class="pill good">Paid</span>', late: '<span class="pill warn">Not paid yet</span>', due: '', later: '<span class="pill">Not this month</span>' };
+    rows = `<ul class="cat-bills">${items.map((x) => `<li data-rec="${x.r.id}" data-date="${x.date || ''}">
+        <span class="bill-emoji">${esc(x.r.emoji)}</span><span class="grow">${esc(x.r.name)}<span class="muted"> · ${x.status === 'later' ? (x.date ? 'next ' + esc(shortDate(x.date)) : esc(x.r.freq)) : 'due ' + esc(shortDate(x.date))}</span> ${pill[x.status]}</span>
+        <span class="num">${money(x.amount)}</span></li>`).join('')}</ul>
+      ${b ? `<div class="sub" style="margin-top:4px">Bills use ${money(monthly, true)} of the ${money(b, true)} budget${monthly <= b ? ` → ${money(b - monthly, true)} for other ${esc(c.name.toLowerCase())} spending` : ` — <span class="bad">${money(monthly - b, true)} more than the budget</span>`}</div>` : ''}`;
+  }
+  return `<button class="cat-bills-toggle" data-catbills="${c.id}" aria-expanded="${open}">🧾 ${bills.length} bill${bills.length === 1 ? '' : 's'} · ${money(monthly, true)}/mo <span class="chev ${open ? 'open' : ''}" aria-hidden="true">›</span></button>${rows}`;
+}
+
 // ---------- One-time data updates ----------
 function runMigrations() {
   const m = (state.migrations ||= {});
@@ -623,6 +651,8 @@ function openPasteBills() {
 }
 
 function handleBillsClick(e) {
+  const cb = e.target.closest('[data-catbills]');
+  if (cb) { const k = cb.dataset.catbills; (state.ui.catBillsOpen ||= {})[k] = !state.ui.catBillsOpen[k]; save(); render(); return true; }
   const bg = e.target.closest('[data-bankgroup]');
   if (bg) { const k = bg.dataset.bankgroup; (state.ui.bankOpen ||= {})[k] = !state.ui.bankOpen[k]; save(); render(); return true; }
   const ms = e.target.closest('[data-method-seg] button');
