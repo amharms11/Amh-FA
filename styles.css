@@ -270,3 +270,6 @@ svg.chart text { fill: var(--muted); font-size: 10px; }
 .bill-list { margin: 0 0 4px 16px; }
 .bill-list li { padding: 6px 2px; font-size: 13.5px; gap: 8px; }
 .bill-emoji { width: 22px; text-align: center; flex: none; }
+
+.paste-box { width: 100%; border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 10px 12px; font: 13px/1.4 ui-monospace, Menlo, monospace; margin-bottom: 10px; }
+.list li input[type=checkbox] { width: 20px; height: 20px; flex: none; accent-color: var(--accent); }

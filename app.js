@@ -404,13 +404,14 @@ function recurringForm(r) {
       { key: 'freq', label: 'Repeats', type: 'select', options: [['monthly', 'Every month'], ['biweekly', 'Every 2 weeks'], ['weekly', 'Every week'], ['quarterly', 'Every 3 months'], ['yearly', 'Every year']].map(([value, label]) => ({ value, label })) },
       { key: 'variable', label: 'The amount changes each time (e.g. electric, water)', type: 'checkbox' },
       { key: 'autopay', label: 'Paid automatically (autopay)', type: 'checkbox' },
+      { key: 'match', label: 'Match payments containing these words (optional)', placeholder: 'e.g. auto loan — as it appears in your transactions' },
       { key: 'categoryId', label: 'Category', type: 'select', options: catOptions(['expense', 'transfer']) },
       { key: 'accountId', label: 'Paid from', type: 'select', options: acctOptions() },
     ],
     onSave(v) {
       const rec = isNew ? { id: uid() } : state.recurrings.find((x) => x.id === r.id);
       Object.assign(rec, { ...v, amount: round2(Math.abs(v.amount)), emoji: v.emoji || '🔁' });
-      if (r.match && !rec.match) rec.match = r.match;
+      rec.match = v.match ? normPayee(v.match) : (r.match || '');
       if (r.suggKey) delete (state.ignoredBills || {})[r.suggKey];
       if (isNew) state.recurrings.push(rec);
       toast(isNew ? 'Bill added' : 'Saved');

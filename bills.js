@@ -14,7 +14,7 @@ const ALLOC_COLORS = { bills: '#2f6bff', setaside: '#a35bff', spending: '#e39a12
 const FREQ_LABEL = { weekly: 'weekly', biweekly: 'every 2 weeks', monthly: 'monthly', quarterly: 'every 3 months', yearly: 'yearly' };
 const FREQ_DAYS = { weekly: 7, biweekly: 14, monthly: 30.44, quarterly: 91.3, yearly: 365.25 };
 const LOAN_RE = /\b(loan|lending|lender|mortgage|student|navient|nelnet|mohela|sallie|aidvantage|edfinancial|great lakes|auto pay(ment)?|auto loan|car pay(ment)?|financ\w*|fin svc|fin serv|ally|santander|carmax|westlake|exeter|credit acceptance|lease|leasing|upstart|lendingclub|prosper|best egg|avant|oportun|affirm|klarna|afterpay)\b/;
-const INSURANCE_RE = /\b(insurance|insur|geico|progressive|state farm|allstate|usaa|liberty mutual|farmers|nationwide|lemonade|root ins|metlife|aflac)\b/;
+const INSURANCE_RE = /\b(insurance|insur|geico|progressive|state farm|allstate|usaa|liberty mutual|farmers|nationwide|lemonade|root ins|metlife|aflac|life ins)\b/;
 const CARD_PAYMENT_RE = /(credit card|card pa?y?me?n?t|crd pmt|cc pmt|payment thank you|autopay payment|amex|american express|discover card|chase card|citi card|barclay|synchrony|capital one (?!auto))/;
 const OWN_TRANSFER_RE = /(transfer (to|from)|to savings|from savings|savings|vault|round ?up|internal transfer|between accounts)/;
 const billKey = (payee) => normPayee(payee).split(' ').filter(Boolean).slice(0, 3).join(' ');
@@ -27,6 +27,7 @@ function billEmoji(text, catName) {
   if (/mortgage|hoa|rent/.test(text) || catName === 'Housing') return '🏠';
   if (/student|navient|nelnet|mohela|sallie|aidvantage|edfinancial|great lakes/.test(text)) return '🎓';
   if (INSURANCE_RE.test(text)) return '🛡️';
+  if (/school|preschool|daycare|tuition|lunch|kids|child/.test(text) || /kid|school/i.test(catName || '')) return '🎒';
   if (/auto|car|toyota|honda|ford|chevy|gm financial|nissan|hyundai|kia|tesla|bmw|santander|carmax|westlake|exeter|credit acceptance|ally/.test(text)) return '🚗';
   if (/verizon|t mobile|at&t|att|sprint|mint mobile|visible|cricket|phone|wireless/.test(text)) return '📱';
   if (/electric|power|energy|gas co|water|sewer|trash|utility|utilities/.test(text) || catName === 'Bills & Utilities') return '💡';
@@ -265,7 +266,7 @@ function viewBills() {
       ${monthlyPay ? `<div style="text-align:right"><div class="muted small">Take-home pay</div><div class="mid good">${money(monthlyPay, true)}</div><div class="small muted">per month</div></div>` : ''}</div>
       ${pctOfPay !== null ? `<div class="bar ${pctOfPay > 60 ? 'over' : pctOfPay > 45 ? 'near' : 'good'}" style="margin-top:10px"><i style="width:${Math.min(100, pctOfPay)}%"></i></div>
         <div class="small muted" style="margin-top:4px">Bills use <b style="color:var(--text)">${pctOfPay}%</b> of your take-home pay. Everyday budgets ${money(everydayMonthly(), true)}/mo · Savings ${money(plan?.savingsMonthly || 0, true)}/mo${plan && !(+p.save > 0) && plan.goalsMonthly > plan.savingsMonthly + 1 ? ` <span class="bad">(your goals need ${money(plan.goalsMonthly, true)}/mo)</span>` : ''} · Left ${money(monthlyPay - mb - everydayMonthly() - (plan?.savingsMonthly || 0), true)}/mo</div>` : ''}
-      <div class="btn-row"><button class="btn small" data-a="newrec">+ Add a bill</button></div>
+      <div class="btn-row"><button class="btn small" data-a="newrec">+ Add a bill</button><button class="btn small secondary" data-a="pastebills">📋 Paste a bill list</button></div>
     </div>
 
     ${billSuggestionsHTML()}
@@ -328,10 +329,104 @@ function billsContext() {
   return L.join('\n');
 }
 
+// ---------- Paste a bill list ----------
+// One bill per line:  Name | Amount | Repeats | Next due | Category | Paid from | Match words
+// Amount may end in "varies". Next due: a date (2026-11-06), a day of the month (9, or "11, 27" for
+// twice a month), or a weekday (Sunday). Lines starting with # are ignored.
+const BILL_STOPWORDS = new Set(['loan', 'loans', 'payment', 'payments', 'pmt', 'bill', 'bills', 'city', 'county', 'of', 'the', 'and', 'auto',
+  'insurance', 'monthly', 'service', 'services', 'finance', 'financial', 'school', 'inc', 'llc', 'co', 'company', 'apps', 'subscriptions', 'utility']);
+const billTokens = (...texts) => new Set(texts.flatMap((x) => normPayee(x).split(' ')).filter((w) => w.length >= 3 && !BILL_STOPWORDS.has(w)));
+function findDuplicateBill(b) {
+  const mine = billTokens(b.name, b.match || '');
+  return state.recurrings.find((r) => {
+    const theirs = billTokens(r.name, r.match || '');
+    if ([...mine].some((w) => theirs.has(w))) return true;
+    return b.match && r.match && (b.match.includes(r.match) || r.match.includes(b.match));
+  });
+}
+function nextDueFrom(spec, freq) {
+  const t0 = today(), s = String(spec || '').trim().toLowerCase();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return [s];
+  const wd = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'].findIndex((d) => s.startsWith(d.slice(0, 3)));
+  if (wd >= 0) { const d = parseD(t0); d.setDate(d.getDate() + ((wd - d.getDay() + 7) % 7)); return [iso(d)]; }
+  const days = (s.match(/\d{1,2}/g) || []).map(Number).filter((n) => n >= 1 && n <= 31);
+  if (!days.length) return [t0];
+  return days.slice(0, freq === 'monthly' ? 2 : 1).map((day) => {
+    let ym = monthOf(t0), d = `${ym}-${pad(Math.min(day, daysInMonth(ym)))}`;
+    if (d < t0) { ym = addMonths(ym, 1); d = `${ym}-${pad(Math.min(day, daysInMonth(ym)))}`; }
+    return d;
+  });
+}
+function parseBillList(text) {
+  const out = [];
+  for (const raw of String(text).split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const cols = (line.includes('|') ? line.split('|') : line.split(/\t/)).map((c) => c.trim());
+    if (cols.length < 2 || /^name$/i.test(cols[0])) continue;
+    const [name, amountText = '', repeatsText = 'monthly', dueText = '', catText = '', fromText = '', matchText = ''] = cols;
+    const amount = Math.abs(parseMoney((amountText.match(/[\d,.]+/) || ['0'])[0]));
+    if (!name || !amount) continue;
+    const r = repeatsText.toLowerCase();
+    const freq = /2 ?weeks|bi-?weekly|every other/.test(r) ? 'biweekly' : /week/.test(r) ? 'weekly' : /quarter|3 months/.test(r) ? 'quarterly' : /year|annual/.test(r) ? 'yearly' : 'monthly';
+    const dues = nextDueFrom(dueText, freq);
+    const account = fromText && state.accounts.find((a) => {
+      const f = fromText.toLowerCase(), n = a.name.toLowerCase();
+      return n.includes(f) || (/card|credit/.test(f) && a.type === 'credit') || (/check/.test(f) && a.type === 'checking');
+    });
+    const base = { name, amount: round2(amount / dues.length), freq, variable: /var|~|about/i.test(amountText), catText, accountId: account?.id || '',
+      match: normPayee(matchText) };
+    dues.forEach((start, i) => out.push({ ...base, start, name: dues.length > 1 ? `${name} (${ordinal(+start.slice(8))})` : name, key: `${name}#${i}` }));
+  }
+  return out;
+}
+function categoryFor(text, b) {
+  if (text) {
+    const found = state.categories.find((c) => c.name.toLowerCase() === text.toLowerCase());
+    if (found) return found.id;
+    const c = { id: uid(), name: text, emoji: /kid|school|child/i.test(text) ? '🧒' : '📦', kind: /transfer/i.test(text) ? 'transfer' : 'expense', budget: 0 };
+    state.categories.push(c);
+    return c.id;
+  }
+  return guessCategory(b.match || b.name);
+}
+function openPasteBills() {
+  openSheet('Paste a bill list', `
+    <p class="small muted" style="margin-top:0">One bill per line, like:<br><code>Car loan | 450.00 | monthly | 9 | Transfer | Checking | auto loan</code><br>
+      Name | amount | repeats | next due (date, day of month, or weekday) | category | paid from | words to find the payment.</p>
+    <textarea class="paste-box" rows="10" placeholder="Paste your list here"></textarea>
+    <button class="btn" data-review>Review bills</button>
+    <div data-review-out></div>`, (sheet) => {
+    let items = [];
+    const out = $('[data-review-out]', sheet);
+    $('[data-review]', sheet).addEventListener('click', () => {
+      items = parseBillList($('textarea', sheet).value).map((b) => ({ ...b, dup: findDuplicateBill(b) }));
+      if (!items.length) { out.innerHTML = '<p class="small bad">No bills found. Use one line per bill with | between the parts.</p>'; return; }
+      const newCount = items.filter((b) => !b.dup).length;
+      out.innerHTML = `<div class="section-title">${items.length} bills found · ${items.length - newCount} look like ones you already have</div>
+        <ul class="list card" style="padding:2px 14px">${items.map((b, i) => `<li style="cursor:default"><input type="checkbox" data-pick="${i}" ${b.dup ? '' : 'checked'} aria-label="Add ${esc(b.name)}">
+          <div class="grow"><div class="title ellipsis">${esc(b.name)}</div>
+          <div class="sub">${b.variable ? 'about ' : ''}${money(b.amount)} · ${esc(FREQ_LABEL[b.freq])} · next ${esc(shortDate(b.start))}${b.catText ? ' · ' + esc(b.catText) : ''}${b.accountId ? ' · ' + esc(acct(b.accountId).name) : ''}</div>
+          ${b.dup ? `<div class="sub bad">Looks like you already have: ${esc(b.dup.name)} — left unchecked</div>` : ''}</div></li>`).join('')}</ul>
+        <button class="btn" data-addpicked>Add checked bills</button>`;
+      $('[data-addpicked]', out).addEventListener('click', () => {
+        const picked = items.filter((_, i) => $(`[data-pick="${i}"]`, out).checked);
+        for (const b of picked) {
+          state.recurrings.push({ id: uid(), name: b.name, amount: b.amount, freq: b.freq, start: b.start, variable: b.variable,
+            categoryId: categoryFor(b.catText, b), accountId: b.accountId, match: b.match,
+            emoji: billEmoji(normPayee(b.name + ' ' + b.match), b.catText) });
+        }
+        save(); closeSheet(); render(); toast(`Added ${picked.length} bill${picked.length === 1 ? '' : 's'}`);
+      });
+    });
+  });
+}
+
 function handleBillsClick(e) {
   const ig = e.target.closest('[data-ignoresugg]');
   if (ig) { (state.ignoredBills ||= {})[ig.dataset.ignoresugg] = 1; save(); render(); toast('Hidden — it won’t be suggested again'); return true; }
   const n = e.target.closest('[data-a]');
+  if (n?.dataset.a === 'pastebills') { openPasteBills(); return true; }
   if (n?.dataset.a === 'addallbills') {
     const list = detectRecurring();
     if (!list.length || !confirm(`Add all ${list.length} as bills? You can edit or delete any of them later.`)) return true;
