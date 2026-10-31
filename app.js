@@ -753,6 +753,18 @@ function syncBar() {
     <button class="btn small" data-a="syncnow" ${syncing ? 'disabled' : ''}>${syncing ? 'Syncing…' : 'Sync now'}</button></div>`;
 }
 
+function autosyncLabel() {
+  if (!localApi?.autosync_installed) return '⏰ Automatic sync: not set up on this computer yet (it’s added the next time AMH Finance updates).';
+  const last = localApi.autosync;
+  let lastText = 'hasn’t run yet';
+  if (last) {
+    const [when, ...rest] = last.split(' ');
+    const d = new Date(when);
+    const msg = rest.join(' ');
+    lastText = `last ran ${isNaN(d) ? when : d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} — ${msg.startsWith('ok') ? '✓ ' + esc(msg.slice(4)) : '<span class="bad">' + esc(msg) + '</span>'}`;
+  }
+  return `⏰ Automatic sync: 7:00 am & 8:00 pm daily · ${lastText}`;
+}
 function syncLabel() {
   if (!state.sync) return '';
   const d = new Date(state.sync.at);
@@ -766,6 +778,7 @@ function openSettings() {
     <div class="card"><h2>Data</h2>
       ${localApi?.connected ? '<button class="btn" data-a="syncnow">Sync with SoFi now</button><div class="btn-row"><button class="btn secondary" data-a="plaid">Import SoFi sync file</button></div>' : '<button class="btn" data-a="plaid">Import SoFi sync file</button>'}
       ${state.sync ? `<p class="muted small" style="margin:6px 0 0">Last sync: ${syncLabel()}</p>` : ''}
+      ${localApi ? `<p class="small" style="margin:6px 0 0">${autosyncLabel()}</p>` : ''}
       <div class="btn-row"><button class="btn secondary" data-a="csv">Import bank CSV</button></div>
       <div class="btn-row"><button class="btn secondary" data-a="export">Back up (JSON)</button><button class="btn secondary" data-a="restore">Restore</button></div>
       <div class="btn-row"><button class="btn secondary" data-a="excsv">Export transactions CSV</button></div>
@@ -1093,6 +1106,7 @@ document.addEventListener('DOMContentLoaded', () => {
   applyTheme();
   render();
   detectLocalApi();
+  setInterval(() => { if (localApi && !document.hidden) detectLocalApi(); }, 10 * 60 * 1000); // pick up background syncs
 
   $('.tabbar').addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) goto(b.dataset.tab); });
   $('#addBtn').addEventListener('click', () => (state.ui.tab === 'accounts' ? accountForm() : state.ui.tab === 'recurring' ? recurringForm() : txForm()));

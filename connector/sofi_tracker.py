@@ -372,6 +372,35 @@ def query(start_date=None, end_date=None, search=None, account=None):
     return rows
 
 
+# ---------- Scheduled background sync (run by macOS at 7am and 8pm) ----------
+
+AUTOSYNC_LOG = DATA / "autosync.log"
+
+
+def autosync():
+    """Quietly pull new transactions; record the result for the app's Settings screen."""
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    if not TOKEN_FILE.exists():
+        line = f"{now} skipped: SoFi is not connected yet"
+    else:
+        try:
+            r = sync()
+            line = f"{now} ok: {r['added']} new, {r['modified']} updated, {r['removed']} removed"
+        except Exception as e:  # noqa: BLE001 - logged for the user
+            line = f"{now} failed: {str(e).splitlines()[0][:200] if str(e) else e.__class__.__name__}"
+    DATA.mkdir(parents=True, exist_ok=True)
+    lines = (AUTOSYNC_LOG.read_text().splitlines() if AUTOSYNC_LOG.exists() else [])[-199:] + [line]
+    AUTOSYNC_LOG.write_text("\n".join(lines) + "\n")
+    print(line)
+
+
+def last_autosync():
+    if not AUTOSYNC_LOG.exists():
+        return None
+    lines = AUTOSYNC_LOG.read_text().strip().splitlines()
+    return lines[-1] if lines else None
+
+
 # ---------- Export for the AMH Finance app ----------
 
 def build_export(store: dict) -> dict:
@@ -571,7 +600,9 @@ def run_app(port=APP_PORT):
                     state["claude"] = claude_backend() or ""
                 return self._json({"connected": TOKEN_FILE.exists(), "last_sync": store.get("last_sync"),
                                    "transactions": len(store.get("txns", {})),
-                                   "claude": state["claude"] or None})
+                                   "claude": state["claude"] or None,
+                                   "autosync": last_autosync(),
+                                   "autosync_installed": (Path.home() / "Library/LaunchAgents/com.amhfinance.autosync.plist").exists()})
             if path == "/api/export":
                 return self._json(build_export(load_store()))
             if path.startswith(("/.git", "/connector", "/api")):
@@ -691,6 +722,8 @@ if __name__ == "__main__":
         link()
     elif cmd == "sync":
         print(json.dumps(sync(), indent=1))
+    elif cmd == "autosync":
+        autosync()
     elif cmd == "export":
         print(json.dumps(export(sys.argv[2] if len(sys.argv) > 2 else None), indent=1))
     else:

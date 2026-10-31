@@ -125,6 +125,45 @@ EOF
 chmod +x "$NEW_LAUNCHER"
 mv -f "$NEW_LAUNCHER" "$LAUNCHER"
 
+# 5. Automatic sync with SoFi at 7:00 am and 8:00 pm (a macOS launch agent; runs even when the app is closed).
+#    If the Mac is asleep at that time, macOS runs it as soon as the Mac wakes up.
+if [ "$(uname)" = "Darwin" ]; then
+  AGENT="$HOME/Library/LaunchAgents/com.amhfinance.autosync.plist"
+  mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.sofi-tracker"
+  NEW_AGENT="$(mktemp)"
+  cat > "$NEW_AGENT" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.amhfinance.autosync</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$APP_HOME/.venv/bin/python</string>
+    <string>$APP_HOME/connector/sofi_tracker.py</string>
+    <string>autosync</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
+  <key>StandardOutPath</key><string>$HOME/.sofi-tracker/autosync-output.log</string>
+  <key>StandardErrorPath</key><string>$HOME/.sofi-tracker/autosync-output.log</string>
+  <key>ProcessType</key><string>Background</string>
+</dict>
+</plist>
+PLIST
+  if ! cmp -s "$NEW_AGENT" "$AGENT" 2>/dev/null || ! launchctl print "gui/$(id -u)/com.amhfinance.autosync" >/dev/null 2>&1; then
+    launchctl bootout "gui/$(id -u)" "$AGENT" >/dev/null 2>&1 || true
+    mv -f "$NEW_AGENT" "$AGENT"
+    launchctl bootstrap "gui/$(id -u)" "$AGENT" >/dev/null 2>&1 || launchctl load -w "$AGENT" >/dev/null 2>&1 || true
+    info "    Automatic SoFi sync set for 7:00 am and 8:00 pm every day."
+  else
+    rm -f "$NEW_AGENT"
+  fi
+fi
+
 if [ "$UPDATE" != 1 ]; then
   say "Done! Opening AMH Finance..."
   echo "    Next time, just double-click \"AMH Finance\" on your Desktop."

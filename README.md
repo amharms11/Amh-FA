@@ -53,6 +53,8 @@ python sofi_tracker.py app       # opens http://localhost:8770
 ```
 In the app, click **Start with my SoFi data**, then confirm the accounts. After that, click **Sync now** whenever you want fresh purchases, deposits and balances. When the app opens it also loads anything synced in the meantime, for example by Claude Desktop.
 
+**Automatic sync:** the installer adds a macOS launch agent (`~/Library/LaunchAgents/com.amhfinance.autosync.plist`) that syncs with SoFi at 7:00 am and 8:00 pm every day, even when the app is closed. If the Mac is asleep at that time, it runs as soon as the Mac wakes. Results are listed in Settings and in `~/.sofi-tracker/autosync.log`. To turn it off: `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.amhfinance.autosync.plist` and delete that file.
+
 To use it again later: `cd Amh-FA/connector`, `source .venv/bin/activate`, then `python sofi_tracker.py app`. Always use the same address (`http://localhost:8770`), because the browser keeps your app data per address and per browser.
 
 ### iPhone (optional)
