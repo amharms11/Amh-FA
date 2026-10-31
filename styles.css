@@ -261,3 +261,12 @@ svg.chart text { fill: var(--muted); font-size: 10px; }
 .rtable td { text-align: right; padding: 7px 0; border-top: 1px solid var(--line); }
 .tabbar button span { white-space: nowrap; }
 @media (max-width: 380px) { .tabbar button span { font-size: 10px; } }
+
+/* Bills & paycheck plan */
+.alloc { display: flex; height: 10px; border-radius: 6px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); margin: 10px 0 8px; }
+.alloc i { display: block; height: 100%; }
+.alloc-row { padding: 5px 0; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 7px; vertical-align: 0; }
+.bill-list { margin: 0 0 4px 16px; }
+.bill-list li { padding: 6px 2px; font-size: 13.5px; gap: 8px; }
+.bill-emoji { width: 22px; text-align: center; flex: none; }

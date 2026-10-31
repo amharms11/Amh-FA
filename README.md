@@ -4,6 +4,7 @@ A private personal finance tracker: spending, budgets, recurring bills and subsc
 
 ## Features
 - **Ask Claude** (✨ button): ask questions about your money in plain English, e.g. "How much did I spend eating out last month?". It uses your Claude account through Claude Code (set it up from the Desktop launcher by typing `c`), or an Anthropic API key if you add `ANTHROPIC_API_KEY=...` to `~/.sofi-tracker/config.env`. Your question and a summary of your finances are sent to Claude to answer.
+- **Bills** tab: each bill has a budgeted amount and a due date (one-off amounts, variable bills like electric, autopay), with budget-vs-actual. A **paycheck plan** detects your paycheck from deposits and splits each upcoming paycheck into bills, set-asides for yearly bills, everyday spending and savings. Each bill is paid from the last paycheck that arrives before it's due, overloaded paychecks pay some bills early, and extra from one paycheck is kept for the next one's bills.
 - **Heads up**: bill reminders (1–7 days ahead, optional desktop pop-ups), budgets near or over their limit, unusual or possibly doubled charges, and accounts that may not cover this week's bills
 - **This week**: spending so far this week vs the same days last week
 - **Reports**: spending by category, store or month, for any period, with month-by-month income/spending/net and a CSV download

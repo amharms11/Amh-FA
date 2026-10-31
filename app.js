@@ -190,7 +190,7 @@ function findPayment(r, date) {
   const key = normPayee(r.name);
   return state.transactions.find((t) => t.date >= lo && t.date <= hi && (
     t.recurringId === r.id ||
-    (key && normPayee(t.payee).includes(key) && Math.abs(Math.abs(t.amount) - r.amount) <= Math.max(2, r.amount * 0.25))
+    (key && normPayee(t.payee).includes(key) && (r.variable || Math.abs(Math.abs(t.amount) - r.amount) <= Math.max(2, r.amount * 0.25)))
   ));
 }
 function nextDue(r) {
@@ -421,14 +421,16 @@ function recurringForm(r) {
   const isNew = !r || !r.id;
   r = { name: '', amount: '', freq: 'monthly', start: today(), emoji: '🔁', categoryId: state.categories.find((c) => c.name === 'Subscriptions')?.id, accountId: '', ...(r || {}) };
   openForm({
-    title: isNew ? 'New recurring' : 'Edit recurring',
+    title: isNew ? 'New bill' : 'Edit bill',
     values: r,
     fields: [
-      { key: 'name', label: 'Name', required: true, placeholder: 'e.g. Netflix, Rent, Car payment' },
+      { key: 'name', label: 'Bill name', required: true, placeholder: 'e.g. Rent, Electric, Netflix, Car payment' },
       { key: 'emoji', label: 'Emoji', maxlength: 4 },
-      { key: 'amount', label: 'Amount', type: 'money', required: true },
-      { key: 'freq', label: 'Repeats', type: 'select', options: ['weekly', 'biweekly', 'monthly', 'quarterly', 'yearly'].map((f) => ({ value: f, label: f[0].toUpperCase() + f.slice(1) })) },
-      { key: 'start', label: 'A due date (sets the schedule)', type: 'date', required: true },
+      { key: 'amount', label: 'Budgeted amount', type: 'money', required: true, big: true },
+      { key: 'start', label: 'Due date (next or most recent one)', type: 'date', required: true },
+      { key: 'freq', label: 'Repeats', type: 'select', options: [['monthly', 'Every month'], ['biweekly', 'Every 2 weeks'], ['weekly', 'Every week'], ['quarterly', 'Every 3 months'], ['yearly', 'Every year']].map(([value, label]) => ({ value, label })) },
+      { key: 'variable', label: 'The amount changes each time (e.g. electric, water)', type: 'checkbox' },
+      { key: 'autopay', label: 'Paid automatically (autopay)', type: 'checkbox' },
       { key: 'categoryId', label: 'Category', type: 'select', options: catOptions(['expense', 'transfer']) },
       { key: 'accountId', label: 'Paid from', type: 'select', options: acctOptions() },
     ],
@@ -436,7 +438,7 @@ function recurringForm(r) {
       const rec = isNew ? { id: uid() } : state.recurrings.find((x) => x.id === r.id);
       Object.assign(rec, { ...v, amount: round2(Math.abs(v.amount)), emoji: v.emoji || '🔁' });
       if (isNew) state.recurrings.push(rec);
-      toast(isNew ? 'Recurring added' : 'Saved');
+      toast(isNew ? 'Bill added' : 'Saved');
     },
     onDelete: isNew ? null : () => { state.recurrings = state.recurrings.filter((x) => x.id !== r.id); },
   });
@@ -444,11 +446,14 @@ function recurringForm(r) {
 
 function recurringDetail(r, date) {
   const paid = findPayment(r, date);
+  const last = paid || lastPayment(r);
+  const diff = last ? round2(-last.amount - r.amount) : 0;
   openSheet(r.name, `
     <div class="card"><div class="spread"><div class="row"><div class="emoji">${esc(r.emoji)}</div>
-      <div><div class="mid">${money(r.amount)}</div><div class="muted small">${esc(r.freq)} · due ${esc(shortDate(date))}</div></div></div>
+      <div><div class="mid">${money(r.amount)}</div><div class="muted small">budgeted · ${esc(r.freq)} · due ${esc(shortDate(date))}${r.autopay ? ' · autopay' : ''}</div></div></div>
       ${paid ? '<span class="pill good">Paid</span>' : '<span class="pill warn">Unpaid</span>'}</div>
       ${paid ? `<p class="muted small">Matched: ${esc(paid.payee)} on ${esc(shortDate(paid.date))} (${money(paid.amount)})</p>` : ''}
+      ${last ? `<p class="small" style="margin:6px 0 0">${paid ? 'Paid' : 'Last paid'} ${money(-last.amount)}${Math.abs(diff) >= 1 ? ` — <span class="${diff > 0 ? 'bad' : 'good'}">${money(Math.abs(diff))} ${diff > 0 ? 'over' : 'under'} budget</span>` : ' — right on budget'}</p>` : ''}
     </div>
     ${paid ? '' : '<button class="btn" data-pay>Mark as paid (adds transaction)</button>'}
     <div class="btn-row"><button class="btn secondary" data-edit>Edit</button></div>`, (sheet) => {
@@ -1064,7 +1069,7 @@ function viewAccounts() {
 }
 
 // ---------- Render & events ----------
-const TITLES = { home: 'Home', tx: 'Activity', budgets: 'Budgets', recurring: 'Recurring', reports: 'Reports', accounts: 'Net worth' };
+const TITLES = { home: 'Home', tx: 'Activity', budgets: 'Budgets', recurring: 'Bills', reports: 'Reports', accounts: 'Net worth' };
 function render() {
   const view = $('#view');
   const tab = state.ui.tab;
@@ -1075,7 +1080,7 @@ function render() {
   $('#askTopBtn').style.display = state.setup ? '' : 'none';
   $('#pageTitle').textContent = state.setup ? TITLES[tab] : 'AMH Finance';
   if (!state.setup) { view.innerHTML = viewWelcome(); return; }
-  view.innerHTML = ({ home: viewHome, tx: viewTx, budgets: viewBudgets, recurring: viewRecurring, reports: viewReports, accounts: viewAccounts }[tab] || viewHome)();
+  view.innerHTML = ({ home: viewHome, tx: viewTx, budgets: viewBudgets, recurring: viewBills, reports: viewReports, accounts: viewAccounts }[tab] || viewHome)();
 }
 function goto(tab) { state.ui.tab = tab; render(); window.scrollTo({ top: 0 }); }
 
@@ -1100,7 +1105,7 @@ document.addEventListener('DOMContentLoaded', () => {
   view.addEventListener('click', (e) => {
     const el = (s) => e.target.closest(s);
     let n;
-    if (handleFeatureClick(e)) return;
+    if (handleFeatureClick(e) || handleBillsClick(e)) return;
     if ((n = el('[data-a]'))) {
       const a = n.dataset.a;
       if (a === 'start') { state.setup = true; save(); render(); accountForm(); }

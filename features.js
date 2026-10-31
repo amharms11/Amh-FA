@@ -291,6 +291,7 @@ function buildClaudeContext() {
     L.push('\nSAVINGS GOALS (goal | saved | target | target date)');
     for (const g of state.goals) L.push(`${g.name} | ${money(g.saved)} | ${money(g.target)} | ${g.by || 'none'}`);
   }
+  L.push(billsContext());
   const since = addDays(t0, -365);
   const txs = state.transactions.filter((t) => t.date >= since).sort((a, b) => b.date.localeCompare(a.date));
   const shown = txs.slice(0, 3000);
