@@ -57,7 +57,7 @@ const KEYWORD_HINTS = [
   [/pharmacy|cvs|walgreens|doctor|dental|clinic|hospital|gym|fitness/, 'Health'],
   [/airline|delta|united|southwest|hotel|airbnb|marriott|hilton|expedia/, 'Travel'],
   [/payroll|salary|direct dep|deposit|interest paid|dividend|refund/, 'Income'],
-  [/transfer|payment thank|autopay|credit card payment|venmo|zelle/, 'Transfer'],
+  [/transfer|vault|payment thank|autopay|credit card payment|venmo|zelle/, 'Transfer'],
 ];
 
 const ACCOUNT_TYPES = {
@@ -165,6 +165,7 @@ function guessCategory(payee) {
   const n = normPayee(payee);
   const rule = ruleFor(payee);
   if (rule) return rule;
+  if (isOwnMove(payee) && transferCatId()) return transferCatId();
   for (const [re, name] of KEYWORD_HINTS) if (re.test(n + ' ')) {
     const c = state.categories.find((x) => x.name === name);
     if (c) return c.id;
@@ -604,9 +605,14 @@ const PLAID_CATEGORY_MAP = [
   [/^TRANSFER_IN|^TRANSFER_OUT/, 'Transfer'],
   [/^BANK_FEES|^GENERAL_SERVICES/, 'Bills & Utilities'],
 ];
+/** Money moved between your own accounts (SoFi vaults, savings transfers) — not spending, not a bill. */
+const OWN_MOVE_RE = /\bvaults?\b|\b(to|from) (savings|checking)\b|transfer (to|from)|internal transfer|round ?ups?\b/;
+const isOwnMove = (payee) => OWN_MOVE_RE.test(normPayee(payee));
+const transferCatId = () => state.categories.find((c) => c.kind === 'transfer')?.id;
 function categorizePlaid(payee, p) {
   const rule = ruleFor(payee);
   if (rule) return rule;
+  if (isOwnMove(payee) && transferCatId()) return transferCatId();
   for (const code of [p.subcategory, p.category]) {
     if (!code) continue;
     const hit = PLAID_CATEGORY_MAP.find(([re]) => re.test(code));

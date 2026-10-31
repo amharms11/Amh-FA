@@ -44,7 +44,8 @@ function detectRecurring() {
     if (c.kind === 'income') continue;
     const isLoan = /^LOAN_PAYMENTS/.test(pc) && !/CREDIT_CARD/.test(pc) || LOAN_RE.test(text) || INSURANCE_RE.test(text);
     if (/CREDIT_CARD_PAYMENT/.test(pc) || (CARD_PAYMENT_RE.test(text) && !isLoan)) continue;
-    if (c.kind === 'transfer' && !isLoan && (/TRANSFER_(IN|OUT)_(ACCOUNT_TRANSFER|SAVINGS|INVESTMENT)/.test(pc) || OWN_TRANSFER_RE.test(text))) continue;
+    if (!isLoan && (isOwnMove(t.payee) || OWN_TRANSFER_RE.test(text))) continue; // vaults & own-account moves are never bills
+    if (c.kind === 'transfer' && !isLoan && /TRANSFER_(IN|OUT)_(ACCOUNT_TRANSFER|SAVINGS|INVESTMENT)/.test(pc)) continue;
     const k = billKey(t.payee);
     if (!k) continue;
     (groups[k] ||= { list: [], isLoan: false, transfer: false }).list.push(t);
@@ -599,6 +600,20 @@ function onRecategorize(sel) {
 // ---------- One-time data updates ----------
 function runMigrations() {
   const m = (state.migrations ||= {});
+  if (!m.vaultMoves) {
+    // Vault / own-account transfers aren't spending or bills: file them as Transfer and drop vault "bills".
+    const tid = transferCatId();
+    let moved = 0, removed = [];
+    if (tid) state.transactions.forEach((t) => { if (t.categoryId !== tid && isOwnMove(t.payee) && !ruleFor(t.payee) && !t.splits?.length) { t.categoryId = tid; moved++; } });
+    state.recurrings = state.recurrings.filter((r) => {
+      const own = isOwnMove(`${r.name} ${r.match || ''}`);
+      if (own) { removed.push(r.name); (state.ignoredBills ||= {})[r.match || billKey(r.name)] = 1; }
+      return !own;
+    });
+    m.vaultMoves = true;
+    save();
+    if (moved || removed.length) setTimeout(() => toast(`Vault transfers are no longer counted as spending${removed.length ? ` · removed bill${removed.length > 1 ? 's' : ''}: ${removed.join(', ')}` : ''}`), 800);
+  }
   if (!m.savingsByName) {
     state.accounts.forEach((a) => { if (a.type === 'checking' && /saving|vault/i.test(a.name || '')) a.type = 'savings'; });
     m.savingsByName = true;
