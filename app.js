@@ -371,7 +371,7 @@ function accountForm(a) {
       { key: 'institution', label: 'Institution', placeholder: 'Optional' },
       { key: 'type', label: 'Type', type: 'select', options: Object.entries(ACCOUNT_TYPES).map(([value, t]) => ({ value, label: `${t.emoji} ${t.label}` })) },
       { key: 'balance', label: isNew ? 'Current balance (amount owed for cards/loans)' : 'Current balance — change to update', type: 'money', required: true, placeholder: '0.00' },
-      { key: 'hidden', label: 'Exclude from net worth', type: 'checkbox' },
+      { key: 'hidden', label: 'Hide from totals on Home', type: 'checkbox' },
     ],
     onSave(v) {
       const liability = ACCOUNT_TYPES[v.type].liability;
@@ -880,7 +880,7 @@ const txRow = (t) => {
 function viewWelcome() {
   return `<div class="welcome"><img src="icons/icon.svg" alt="">
     <h2>Your money, privately.</h2>
-    <p>Track spending, budgets, recurring bills and net worth. Everything stays on this device — no accounts, no tracking.</p>
+    <p>Track spending, budgets, bills and your bank balances. Everything stays on this device — no accounts, no tracking.</p>
     ${localApi?.connected ? '<button class="btn" data-a="syncnow">Start with my SoFi data</button><div class="btn-row"><button class="btn secondary" data-a="start">Start empty</button></div>'
       : localApi ? '<p class="small bad">SoFi isn’t linked yet — run <code>python sofi_tracker.py link</code>, then reload.</p><button class="btn" data-a="start">Get started</button>'
       : '<button class="btn" data-a="start">Get started</button>'}
@@ -895,8 +895,6 @@ function viewHome() {
   const budget = totalBudget();
   const dim = daysInMonth(ym), day = new Date().getDate();
   const pace = budget ? (budget * day) / dim : 0;
-  const nw = netWorth();
-  const snaps = Object.entries(state.snapshots).sort().slice(-60).map(([date, value]) => ({ date, value }));
   const prevM = addMonths(ym, -1);
   const prevSpentSameDay = txInMonth(prevM).filter((t) => +t.date.slice(8) <= day)
     .reduce((s, t) => s - parts(t).reduce((x, p) => x + (cat(p.categoryId).kind === 'expense' ? p.amount : 0), 0), 0);
@@ -1045,23 +1043,10 @@ function viewRecurring() {
 }
 
 function viewAccounts() {
-  const nw = netWorth();
-  const snaps = Object.entries(state.snapshots).sort().map(([date, value]) => ({ date, value }));
-  const range = state.ui.nwRange || 90;
-  const cutoff = addDays(today(), -range);
-  const pts = snaps.filter((p) => p.date >= cutoff);
-  const change = pts.length > 1 ? pts[pts.length - 1].value - pts[0].value : 0;
   const groups = {};
   state.accounts.forEach((a) => (groups[a.type] ||= []).push(a));
   return `
-    <div class="card"><h2>Net worth</h2>
-      <div class="big">${money(nw.net)}</div>
-      ${pts.length > 1 ? `<div class="small ${change >= 0 ? 'good' : 'bad'}">${signed(round2(change))} in ${range >= 365 ? '1 year' : range + ' days'}</div>` : ''}
-      <div style="margin:10px 0">${line(pts.length > 1 ? pts : snaps.slice(-2), 110)}</div>
-      <div class="segmented" data-range>${[[30, '1M'], [90, '3M'], [365, '1Y'], [36500, 'All']].map(([v, l]) => `<button data-v="${v}" class="${range === v ? 'on' : ''}">${l}</button>`).join('')}</div>
-      <div class="spread small" style="margin-top:12px"><span class="muted">Assets</span><span class="num good">${money(nw.assets)}</span></div>
-      <div class="spread small"><span class="muted">Liabilities</span><span class="num bad">${money(nw.liabilities)}</span></div>
-    </div>
+    <p class="small muted" style="margin:4px 4px 0">Tap an account to rename it, change its type, or update its balance.</p>
     ${Object.entries(ACCOUNT_TYPES).filter(([k]) => groups[k]).map(([k, t]) => {
       const sum = groups[k].reduce((s, a) => s + accountBalance(a), 0);
       return `<div class="section-title spread"><span>${esc(t.label)}</span><span class="num">${money(t.liability ? -sum : sum)}</span></div>

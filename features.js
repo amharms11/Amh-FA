@@ -269,10 +269,8 @@ function reportCSV() {
 function buildClaudeContext() {
   const t0 = today(), ym = monthOf(t0), L = [];
   L.push(`Today: ${t0} (${parseD(t0).toLocaleDateString('en-US', { weekday: 'long' })}). Currency: USD.`);
-  const nw = netWorth();
-  L.push(`\nNET WORTH: ${money(nw.net)} (assets ${money(nw.assets)}, debts ${money(nw.liabilities)})`);
   L.push('\nACCOUNTS (name | type | balance; debts shown negative)');
-  for (const a of state.accounts) L.push(`${a.name} | ${ACCOUNT_TYPES[a.type]?.label || a.type} | ${money(accountBalance(a))}${a.hidden ? ' | excluded from net worth' : ''}`);
+  for (const a of state.accounts) L.push(`${a.name} | ${ACCOUNT_TYPES[a.type]?.label || a.type} | ${money(accountBalance(a))}${a.hidden ? ' | hidden from totals' : ''}`);
   const by = spendingByCategory(ym);
   L.push(`\nTHIS MONTH'S BUDGETS (${monthLabel(ym)}, day ${new Date().getDate()} of ${daysInMonth(ym)}) (category | monthly budget | spent so far)`);
   for (const c of expenseCats()) L.push(`${c.name} | ${+c.budget ? money(c.budget) : 'none'} | ${money(by[c.id] || 0)}`);
