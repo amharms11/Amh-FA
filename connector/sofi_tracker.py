@@ -4,7 +4,9 @@ SoFi Tracker - read-only Plaid -> Claude connector (MCP server), for personal us
 Also feeds the AMH Finance app via an export file.
 
 Commands:
+  python sofi_tracker.py setup           # one-time: save your Plaid keys on this computer
   python sofi_tracker.py link            # one-time: connect SoFi in your browser
+  python sofi_tracker.py app             # open the AMH Finance app with a "Sync now" button
   python sofi_tracker.py sync            # optional: pull new transactions from the terminal
   python sofi_tracker.py export [PATH]   # sync, then write a file the AMH Finance app imports
   python sofi_tracker.py                 # run as an MCP server (Claude Desktop starts this for you)
@@ -24,7 +26,10 @@ from pathlib import Path
 DATA = Path.home() / ".sofi-tracker"
 TOKEN_FILE = DATA / "item.json"
 TXN_FILE = DATA / "transactions.json"
+CONFIG_FILE = DATA / "config.env"
 PORT = 8765
+APP_PORT = 8770  # keep fixed: the browser stores app data per address
+APP_DIR = Path(__file__).resolve().parent.parent  # folder with index.html
 
 # Where `export` writes by default. iCloud Drive (if present) makes the file
 # show up in the iPhone Files app, so the AMH Finance app can import it.
@@ -40,10 +45,37 @@ def default_export_path() -> Path:
 
 # ---------- Plaid client & storage ----------
 
+def load_config():
+    """Read keys saved by `setup` (real environment variables win)."""
+    if CONFIG_FILE.exists():
+        for line in CONFIG_FILE.read_text().splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip('"'))
+
+
+def setup():
+    from getpass import getpass
+    print("Paste your keys from https://dashboard.plaid.com (Developers > Keys).")
+    cid = input("PLAID_CLIENT_ID: ").strip()
+    secret = getpass("PLAID_SECRET (hidden as you type): ").strip()
+    env = input("Environment - production or sandbox [production]: ").strip().lower() or "production"
+    DATA.mkdir(parents=True, exist_ok=True)
+    CONFIG_FILE.write_text(f"PLAID_CLIENT_ID={cid}\nPLAID_SECRET={secret}\nPLAID_ENV={env}\n")
+    try:
+        os.chmod(CONFIG_FILE, 0o600)
+    except OSError:
+        pass
+    print(f"Saved to {CONFIG_FILE}. Next: python sofi_tracker.py link")
+
+
 def client():
     import plaid
     from plaid.api import plaid_api
 
+    load_config()
+    if not os.environ.get("PLAID_CLIENT_ID") or not os.environ.get("PLAID_SECRET"):
+        raise RuntimeError("Plaid keys missing. Run: python sofi_tracker.py setup")
     env = os.environ.get("PLAID_ENV", "production").lower()
     host = plaid.Environment.Sandbox if env == "sandbox" else plaid.Environment.Production
     cfg = plaid.Configuration(
@@ -277,6 +309,75 @@ def export(path=None, do_sync=True) -> dict:
             "accounts": len(payload["accounts"]), "transactions": len(payload["transactions"])}
 
 
+# ---------- Local app server (computer-only use) ----------
+
+def run_app(port=APP_PORT):
+    """Serve the AMH Finance app at http://localhost:<port> with a small local API:
+    GET /api/status, GET /api/export (stored data), POST /api/sync (pull from SoFi first).
+    Listens on this computer only."""
+    import functools
+    from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+    allowed_hosts = {f"localhost:{port}", f"127.0.0.1:{port}"}
+
+    class Handler(SimpleHTTPRequestHandler):
+        def _ok_request(self):
+            # Blocks other websites (incl. DNS-rebinding tricks) from reading your data.
+            if self.headers.get("Host") not in allowed_hosts:
+                self.send_error(403)
+                return False
+            return True
+
+        def _json(self, data, code=200):
+            body = json.dumps(data, default=str).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def end_headers(self):
+            self.send_header("Cache-Control", "no-store")
+            super().end_headers()
+
+        def do_GET(self):
+            if not self._ok_request():
+                return
+            path = self.path.split("?")[0]
+            if path == "/api/status":
+                store = load_store()
+                return self._json({"connected": TOKEN_FILE.exists(), "last_sync": store.get("last_sync"),
+                                   "transactions": len(store.get("txns", {}))})
+            if path == "/api/export":
+                return self._json(build_export(load_store()))
+            if path.startswith(("/.git", "/connector", "/api")):
+                return self.send_error(404)
+            return super().do_GET()
+
+        def do_POST(self):
+            if not self._ok_request():
+                return
+            if self.path.split("?")[0] != "/api/sync" or self.headers.get("X-AMH") != "1":
+                return self.send_error(404)
+            try:
+                sync()
+                self._json(build_export(load_store()))
+            except Exception as e:  # show the reason in the app
+                self._json({"error": str(e)}, 500)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", port), functools.partial(Handler, directory=str(APP_DIR)))
+    url = f"http://localhost:{port}"
+    print(f"AMH Finance is running at {url}  (press Ctrl+C to stop)")
+    webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nStopped.")
+
+
 # ---------- MCP server (what Claude talks to) ----------
 
 def serve():
@@ -345,7 +446,11 @@ def serve():
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "serve"
-    if cmd == "link":
+    if cmd == "setup":
+        setup()
+    elif cmd == "app":
+        run_app()
+    elif cmd == "link":
         link()
     elif cmd == "sync":
         print(json.dumps(sync(), indent=1))

@@ -26,32 +26,33 @@ python3 -m http.server 8000   # then open http://localhost:8000
 > Data is stored per browser and per device. Use **Settings → Back up** regularly. Clearing Safari website data deletes it.
 
 ## Automatic SoFi sync (purchases, deposits, balances)
-`connector/sofi_tracker.py` is a read-only Plaid connector that runs on your computer. It can see balances and transactions but can never move money. It also works as an MCP server, so Claude Desktop can answer questions about your spending.
+`connector/sofi_tracker.py` is a read-only Plaid connector. It can see balances and transactions but can never move money. Everything stays on your computer.
 
-**One-time setup on your Mac:**
+### Computer-only setup (recommended)
 ```bash
-cd connector
+git clone https://github.com/amharms11/Amh-FA.git
+cd Amh-FA/connector
+python3 -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-export PLAID_CLIENT_ID=...  PLAID_SECRET=...   # from your Plaid dashboard
-python sofi_tracker.py link                    # sign in to SoFi in the browser
+python sofi_tracker.py setup     # paste Plaid client ID + secret (saved to ~/.sofi-tracker/config.env)
+python sofi_tracker.py link      # sign in to SoFi in the browser, once
+python sofi_tracker.py app       # opens http://localhost:8770
 ```
+In the app, click **Start with my SoFi data**, then confirm the accounts. After that, click **Sync now** whenever you want fresh purchases, deposits and balances. When the app opens it also loads anything synced in the meantime, for example by Claude Desktop.
 
-**Each time you want fresh data:**
-```bash
-python sofi_tracker.py export
-```
-This pulls new transactions from SoFi and writes `iCloud Drive/AMH Finance/sofi-export.json`. In Claude Desktop you can also just ask it to "export for the app".
+To use it again later: `cd Amh-FA/connector`, `source .venv/bin/activate`, then `python sofi_tracker.py app`. Always use the same address (`http://localhost:8770`), because the browser keeps your app data per address and per browser.
 
-Then on your iPhone, open the app → ⚙️ Settings → **Import SoFi sync file** and pick that file in Files. The first time, you choose whether each SoFi account links to an existing account in the app or is created new.
+### iPhone (optional)
+`python sofi_tracker.py export` writes `iCloud Drive/AMH Finance/sofi-export.json`. In the app on your phone, go to ⚙️ Settings → **Import SoFi sync file**.
 
-What the import does:
-- Adds new purchases and deposits, using Plaid's categories (groceries, dining, paycheck, check deposits, transfers…). Categories you have taught the app take priority.
-- Marks pending charges. When one posts, the pending copy is replaced, so nothing is counted twice.
+### What a sync does
+- Adds new purchases and deposits, using Plaid's categories. Categories you've taught the app take priority.
+- Marks pending charges and replaces them when they post, so nothing is counted twice.
 - Sets each account's balance to what SoFi reports.
-- Keeps your edits (category, payee, notes) on transactions it has already imported, and can be re-run safely.
+- Keeps your edits on transactions it has already imported, and can be re-run safely.
 - Recognizes transactions you already entered by hand or from a CSV, so they are not duplicated.
 
-The export file contains your financial data. It is stored in iCloud Drive, and with Advanced Data Protection turned on it is end-to-end encrypted. `.gitignore` keeps export files and tokens out of this repo.
+The local server only accepts connections from your own computer. `.gitignore` keeps export files and tokens out of this repo.
 
 ## Getting your transactions in manually
 Most banks and card issuers can export transactions as CSV from their website. Use **Settings → Import bank CSV**, choose the account, and confirm which columns hold the date, description and amount.

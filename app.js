@@ -696,6 +696,44 @@ function applyPlaid({ accounts, txns, meta }) {
   state.sync = { source: meta.source || 'SoFi', at: meta.last_sync || meta.exported_at || new Date().toISOString(), imported: new Date().toISOString(), added, updated, removed };
   toast(`Synced: ${added} new, ${updated} updated${removed ? `, ${removed} removed` : ''}`);
 }
+// When opened via `python sofi_tracker.py app`, a local API is available for one-tap sync.
+let localApi = null; // { connected, last_sync } or null
+async function detectLocalApi() {
+  if (!/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) return;
+  try {
+    const r = await fetch('api/status', { cache: 'no-store' });
+    if (!r.ok) return;
+    localApi = await r.json();
+    render();
+    // Quietly bring in anything synced since last time (e.g. by Claude Desktop), once accounts are matched.
+    if (localApi.connected && state.setup && state.accounts.some((a) => a.plaidId) && localApi.last_sync && localApi.last_sync !== state.sync?.at) {
+      const data = await (await fetch('api/export', { cache: 'no-store' })).json();
+      const parsed = parsePlaidFile(data);
+      if (parsed && parsed.accounts.every((a) => state.accounts.some((x) => x.plaidId === a.account_id))) { applyPlaid(parsed); save(); render(); }
+    }
+  } catch { /* not running under the local server */ }
+}
+let syncing = false;
+async function syncNow() {
+  if (syncing) return;
+  syncing = true; render(); toast('Syncing with SoFi…');
+  try {
+    const r = await fetch('api/sync', { method: 'POST', headers: { 'X-AMH': '1' } });
+    const data = await r.json();
+    if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
+    localApi = { ...localApi, last_sync: data.last_sync };
+    if (!state.setup) state.setup = true;
+    importPlaidFlow(data);
+  } catch (e) {
+    toast('Sync failed: ' + e.message);
+  } finally { syncing = false; render(); }
+}
+function syncBar() {
+  if (!localApi?.connected) return state.sync ? `<div class="small muted" style="margin:2px 4px 8px">🔗 ${syncLabel()}</div>` : '';
+  return `<div class="card spread" style="padding:10px 14px"><span class="small muted">🔗 ${state.sync ? syncLabel() : 'SoFi connected'}</span>
+    <button class="btn small" data-a="syncnow" ${syncing ? 'disabled' : ''}>${syncing ? 'Syncing…' : 'Sync now'}</button></div>`;
+}
+
 function syncLabel() {
   if (!state.sync) return '';
   const d = new Date(state.sync.at);
@@ -707,7 +745,7 @@ function openSettings() {
   const ruleCount = Object.keys(state.rules).length;
   openSheet('Settings', `
     <div class="card"><h2>Data</h2>
-      <button class="btn" data-a="plaid">Import SoFi sync file</button>
+      ${localApi?.connected ? '<button class="btn" data-a="syncnow">Sync with SoFi now</button><div class="btn-row"><button class="btn secondary" data-a="plaid">Import SoFi sync file</button></div>' : '<button class="btn" data-a="plaid">Import SoFi sync file</button>'}
       ${state.sync ? `<p class="muted small" style="margin:6px 0 0">Last sync: ${syncLabel()}</p>` : ''}
       <div class="btn-row"><button class="btn secondary" data-a="csv">Import bank CSV</button></div>
       <div class="btn-row"><button class="btn secondary" data-a="export">Back up (JSON)</button><button class="btn secondary" data-a="restore">Restore</button></div>
@@ -732,6 +770,7 @@ function openSettings() {
     });
     sheet.addEventListener('click', (e) => {
       const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return;
+      if (a === 'syncnow') { closeSheet(); syncNow(); }
       if (a === 'plaid') { closeSheet(); pickFile('.json,application/json', (txt) => { try { importPlaidFlow(JSON.parse(txt)); } catch { toast('Could not read that file'); } }); }
       if (a === 'csv') { closeSheet(); pickFile('.csv,text/csv', importCSVFlow); }
       if (a === 'export') download(`amh-finance-backup-${today()}.json`, JSON.stringify(state, null, 1), 'application/json');
@@ -788,7 +827,9 @@ function viewWelcome() {
   return `<div class="welcome"><img src="icons/icon.svg" alt="">
     <h2>Your money, privately.</h2>
     <p>Track spending, budgets, recurring bills and net worth. Everything stays on this device — no accounts, no tracking.</p>
-    <button class="btn" data-a="start">Get started</button>
+    ${localApi?.connected ? '<button class="btn" data-a="syncnow">Start with my SoFi data</button><div class="btn-row"><button class="btn secondary" data-a="start">Start empty</button></div>'
+      : localApi ? '<p class="small bad">SoFi isn’t linked yet — run <code>python sofi_tracker.py link</code>, then reload.</p><button class="btn" data-a="start">Get started</button>'
+      : '<button class="btn" data-a="start">Get started</button>'}
     <div class="btn-row"><button class="btn secondary" data-a="demo">Explore with demo data</button></div>
     <div class="btn-row"><button class="btn secondary" data-a="restore">Restore a backup</button></div>
     <p class="muted small" style="margin-top:24px">Tip: in Safari, tap Share → “Add to Home Screen” to install it like an app.</p></div>`;
@@ -817,7 +858,7 @@ function viewHome() {
   const recent = [...state.transactions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
   const trend = Array.from({ length: 6 }, (_, i) => addMonths(ym, i - 5)).map((m) => ({ label: monthLabel(m, true), value: monthTotals(m).spent, highlight: m === ym }));
 
-  return `
+  return `${syncBar()}
   <div class="card"><h2>Spent in ${esc(monthLabel(ym, true))} <button class="link" data-goto="budgets">Budgets</button></h2>
     <div class="hero">
       <div class="ring-wrap">${ring(budget ? spent / budget : 0, budget && spent > budget ? 'var(--bad)' : budget && spent > pace ? 'var(--warn)' : 'var(--accent)')}
@@ -874,7 +915,7 @@ function viewTx() {
     <input class="search" type="search" placeholder="Search payee, note, category, amount" value="${esc(state.ui.txQuery)}" data-search>
     <div class="chips">${chips.map(([v, l]) => `<button class="chip ${f === v ? 'on' : ''}" data-filter="${esc(v)}">${esc(l)}</button>`).join('')}</div>
     <div class="spread small muted" style="margin:10px 4px 0"><span>${list.length} transactions</span><span class="num">Net ${signed(round2(total))}</span></div>
-    ${state.sync ? `<div class="small muted" style="margin:2px 4px 0">🔗 ${syncLabel()}</div>` : ''}
+    <div style="margin-top:8px">${syncBar()}</div>
     ${shown.length ? Object.entries(groups).map(([d, ts]) => `<div class="date-head">${esc(dayLabel(d))}</div><ul class="list card" style="padding:2px 14px">${ts.map(txRow).join('')}</ul>`).join('')
       : '<div class="empty"><div class="e">🔍</div>No matching transactions.</div>'}
     ${list.length > shown.length ? `<p class="muted small" style="text-align:center">Showing latest ${shown.length}. Search to narrow down.</p>` : ''}`;
@@ -999,6 +1040,7 @@ function applyTheme() {
 document.addEventListener('DOMContentLoaded', () => {
   applyTheme();
   render();
+  detectLocalApi();
 
   $('.tabbar').addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) goto(b.dataset.tab); });
   $('#addBtn').addEventListener('click', () => (state.ui.tab === 'accounts' ? accountForm() : state.ui.tab === 'recurring' ? recurringForm() : txForm()));
@@ -1013,6 +1055,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (a === 'start') { state.setup = true; save(); render(); accountForm(); }
       if (a === 'demo') { loadDemo(); save(); render(); toast('Demo data loaded — erase it anytime in Settings'); }
       if (a === 'restore') { openSettings(); }
+      if (a === 'syncnow') syncNow();
       if (a === 'addacct') accountForm();
       if (a === 'newcat') newCategoryForm();
       if (a === 'newgoal') goalForm();

@@ -4,3 +4,4 @@ item.json
 transactions.json
 .env
 __pycache__/
+.venv/
