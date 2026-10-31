@@ -377,6 +377,7 @@ function accountForm(a) {
       const liability = ACCOUNT_TYPES[v.type].liability;
       const desired = liability ? -Math.abs(v.balance) : v.balance;
       const rec = isNew ? { id: uid() } : state.accounts.find((x) => x.id === a.id);
+      if (isNew || v.type !== rec.type) rec.typeLocked = true; // your choice wins over SoFi's label
       Object.assign(rec, { name: v.name, institution: v.institution, type: v.type, hidden: v.hidden });
       const txSum = state.transactions.reduce((s, t) => (t.accountId === rec.id ? s + t.amount : s), 0);
       rec.opening = round2(desired - txSum);
@@ -610,7 +611,9 @@ function plaidAccountType(a) {
   if (t.includes('loan')) return 'loan';
   if (t.includes('investment') || t.includes('brokerage')) return /401|403|457|ira|roth|retire|pension/.test(s) ? 'retirement' : 'investment';
   if (s.includes('saving') || s.includes('money market') || s === 'cd' || /saving|vault/i.test(a.name || '')) return 'savings';
-  return 'checking';
+  if (s.includes('checking') || /check/i.test(a.name || '')) return 'checking';
+  // A bank account SoFi doesn't label, and that isn't named "checking", is treated as savings (e.g. a vault).
+  return (!s || s === 'none' || s === 'null') && a.name ? 'savings' : 'checking';
 }
 /** Accepts the SoFi Tracker export file, or its raw ~/.sofi-tracker/transactions.json store. */
 function parsePlaidFile(data) {
@@ -684,7 +687,11 @@ function applyPlaid({ accounts, txns, meta }) {
   // Use the bank's reported balance as the source of truth.
   for (const pa of accounts) {
     const a = byPlaid(pa.account_id);
-    if (!a || pa.current == null) continue;
+    if (!a) continue;
+    // Follow SoFi's own account type on every sync, unless you've set the type yourself.
+    a.plaidType = String(pa.type || ''); a.plaidSubtype = String(pa.subtype || '');
+    if (!a.typeLocked) a.type = plaidAccountType(pa);
+    if (pa.current == null) continue;
     const desired = ACCOUNT_TYPES[a.type]?.liability ? -Math.abs(pa.current) : Number(pa.current);
     const txSum = state.transactions.reduce((s, t) => (t.accountId === a.id ? s + t.amount : s), 0);
     a.opening = round2(desired - txSum);
@@ -1060,7 +1067,7 @@ function viewAccounts() {
       return `<div class="section-title spread"><span>${esc(t.label)}</span><span class="num">${money(t.liability ? -sum : sum)}</span></div>
       <ul class="list card" style="padding:2px 14px">${groups[k].map((a) => {
         const b = accountBalance(a);
-        return `<li data-acct="${a.id}"><div class="emoji">${t.emoji}</div><div class="grow"><div class="title ellipsis">${esc(a.name)}</div><div class="sub">${esc(a.institution || t.label)}${a.plaidId ? ' · 🔗 synced' : ''}${a.hidden ? ' · hidden' : ''}</div></div><div class="num ${t.liability ? 'bad' : ''}">${money(t.liability ? -b : b)}</div></li>`;
+        return `<li data-acct="${a.id}"><div class="emoji">${t.emoji}</div><div class="grow"><div class="title ellipsis">${esc(a.name)}</div><div class="sub">${esc(a.institution || t.label)}${a.plaidId ? ` · 🔗 synced${a.plaidSubtype && a.plaidSubtype !== 'None' ? ` (SoFi: ${esc(a.plaidSubtype)})` : ''}` : ''}${a.typeLocked && a.plaidId ? ' · type set by you' : ''}${a.hidden ? ' · hidden' : ''}</div></div><div class="num ${t.liability ? 'bad' : ''}">${money(t.liability ? -b : b)}</div></li>`;
       }).join('')}</ul>`;
     }).join('')}
     <button class="btn" data-a="addacct" style="margin-top:8px">Add account</button>
