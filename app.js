@@ -187,7 +187,7 @@ function occurrencesInMonth(r, ym) {
 }
 function findPayment(r, date) {
   const lo = addDays(date, -5), hi = addDays(date, 5);
-  const key = normPayee(r.name);
+  const key = r.match || normPayee(r.name);
   return state.transactions.find((t) => t.date >= lo && t.date <= hi && (
     t.recurringId === r.id ||
     (key && normPayee(t.payee).includes(key) && (r.variable || Math.abs(Math.abs(t.amount) - r.amount) <= Math.max(2, r.amount * 0.25)))
@@ -202,33 +202,6 @@ function nextDue(r) {
   return null;
 }
 const monthlyEquivalent = (r) => r.amount * ({ weekly: 52 / 12, biweekly: 26 / 12, monthly: 1, quarterly: 1 / 3, yearly: 1 / 12 }[r.freq] || 1);
-
-function detectRecurring() {
-  const groups = {};
-  for (const t of state.transactions) {
-    if (t.amount >= 0 || cat(t.categoryId).kind === 'transfer') continue;
-    const k = normPayee(t.payee);
-    if (!k) continue;
-    (groups[k] ||= []).push(t);
-  }
-  const existing = state.recurrings.map((r) => normPayee(r.name));
-  const out = [];
-  for (const [k, list] of Object.entries(groups)) {
-    if (list.length < 3 || existing.some((e) => e && (k.includes(e) || e.includes(k)))) continue;
-    list.sort((a, b) => a.date.localeCompare(b.date));
-    const gaps = [];
-    for (let i = 1; i < list.length; i++) gaps.push((parseD(list[i].date) - parseD(list[i - 1].date)) / 86400000);
-    const avg = gaps.reduce((s, g) => s + g, 0) / gaps.length;
-    const freq = avg > 25 && avg < 35 ? 'monthly' : avg > 12 && avg < 16 ? 'biweekly' : avg > 5 && avg < 9 ? 'weekly' : null;
-    if (!freq) continue;
-    const amts = list.map((t) => -t.amount);
-    const mean = amts.reduce((s, a) => s + a, 0) / amts.length;
-    if (amts.some((a) => Math.abs(a - mean) > Math.max(3, mean * 0.2))) continue;
-    const last = list[list.length - 1];
-    out.push({ name: last.payee, amount: round2(-last.amount), freq, start: last.date, categoryId: last.categoryId, accountId: last.accountId, count: list.length });
-  }
-  return out.slice(0, 8);
-}
 
 // ---------- Charts (inline SVG) ----------
 function ring(pct, color = 'var(--accent)', size = 112, stroke = 12) {
@@ -437,6 +410,8 @@ function recurringForm(r) {
     onSave(v) {
       const rec = isNew ? { id: uid() } : state.recurrings.find((x) => x.id === r.id);
       Object.assign(rec, { ...v, amount: round2(Math.abs(v.amount)), emoji: v.emoji || '🔁' });
+      if (r.match && !rec.match) rec.match = r.match;
+      if (r.suggKey) delete (state.ignoredBills || {})[r.suggKey];
       if (isNew) state.recurrings.push(rec);
       toast(isNew ? 'Bill added' : 'Saved');
     },
@@ -694,14 +669,14 @@ function applyPlaid({ accounts, txns, meta }) {
     const ex = known.get(p.id);
     if (ex) { // keep the user's category/payee/note edits
       if (ex.date !== p.date || ex.amount !== amount || !!ex.pending !== pending) updated++;
-      Object.assign(ex, { date: p.date, amount, pending, accountId: a.id });
+      Object.assign(ex, { date: p.date, amount, pending, accountId: a.id, plaidCat: p.subcategory || p.category || ex.plaidCat || '' });
       fixSplits(ex);
       continue;
     }
     const dup = state.transactions.find((t) => !t.extId && t.accountId === a.id && t.date === p.date && t.amount === amount);
     if (dup) { Object.assign(dup, { extId: p.id, source: 'plaid', pending }); known.set(p.id, dup); updated++; continue; }
     const payee = p.merchant || p.name || 'Unknown';
-    const t = { id: uid(), extId: p.id, source: 'plaid', date: p.date, amount, payee, categoryId: categorizePlaid(payee, p), accountId: a.id, note: '', pending };
+    const t = { id: uid(), extId: p.id, source: 'plaid', date: p.date, amount, payee, categoryId: categorizePlaid(payee, p), accountId: a.id, note: '', pending, plaidCat: p.subcategory || p.category || '' };
     state.transactions.push(t); known.set(p.id, t); added++;
   }
   // Use the bank's reported balance as the source of truth.
@@ -1040,7 +1015,6 @@ function viewRecurring() {
   const totalSum = items.reduce((s, i) => s + i.r.amount, 0);
   const monthly = state.recurrings.reduce((s, r) => s + monthlyEquivalent(r), 0);
   const future = state.recurrings.map((r) => ({ r, d: nextDue(r) })).filter((x) => x.d && monthOf(x.d) !== ym).sort((a, b) => a.d.localeCompare(b.d));
-  const suggestions = detectRecurring();
   const tile = ({ r, d, paid }) => `<div class="tile ${!paid && d <= today() ? 'due' : ''}" data-rec="${r.id}" data-date="${d}">
     ${paid ? '<span class="check">✓</span>' : ''}<div class="e">${esc(r.emoji)}</div><div class="n ellipsis">${esc(r.name)}</div><div class="a">${money(r.amount)}</div><div class="d">${ordinal(+d.slice(8))}</div></div>`;
   return `
@@ -1052,7 +1026,7 @@ function viewRecurring() {
     <div class="section-title spread"><span>This month</span><button class="link" data-a="newrec">+ Add</button></div>
     ${items.length ? `<div class="tiles">${items.map(tile).join('')}</div>` : '<div class="card empty"><div class="e">🔁</div>Add subscriptions and bills to see what’s due and what’s paid.</div>'}
     ${future.length ? `<div class="section-title">In the future</div><ul class="list card" style="padding:2px 14px">${future.map(({ r, d }) => `<li data-rec="${r.id}" data-date="${d}"><div class="emoji">${esc(r.emoji)}</div><div class="grow"><div class="title">${esc(r.name)}</div><div class="sub">${esc(r.freq)} · next ${esc(shortDate(d))}</div></div><div class="num">${money(r.amount)}</div></li>`).join('')}</ul>` : ''}
-    ${suggestions.length ? `<div class="section-title">Detected from your transactions</div><ul class="list card" style="padding:2px 14px">${suggestions.map((s, i) => `<li data-sugg="${i}"><div class="emoji">✨</div><div class="grow"><div class="title ellipsis">${esc(s.name)}</div><div class="sub">${esc(s.freq)} · seen ${s.count}× · ${money(s.amount)}</div></div><span class="pill">Add</span></li>`).join('')}</ul>` : ''}`;
+`;
 }
 
 function viewAccounts() {

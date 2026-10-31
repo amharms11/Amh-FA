@@ -10,6 +10,89 @@ const PAY_FREQS = {
 };
 const ALLOC_COLORS = { bills: '#2f6bff', setaside: '#a35bff', spending: '#e39a12', savings: '#14a36b', hold: '#0ea5b7', left: 'var(--surface-2)' };
 
+// ---------- Finding bills in your transactions ----------
+const FREQ_LABEL = { weekly: 'weekly', biweekly: 'every 2 weeks', monthly: 'monthly', quarterly: 'every 3 months', yearly: 'yearly' };
+const FREQ_DAYS = { weekly: 7, biweekly: 14, monthly: 30.44, quarterly: 91.3, yearly: 365.25 };
+const LOAN_RE = /\b(loan|lending|lender|mortgage|student|navient|nelnet|mohela|sallie|aidvantage|edfinancial|great lakes|auto pay(ment)?|auto loan|car pay(ment)?|financ\w*|fin svc|fin serv|ally|santander|carmax|westlake|exeter|credit acceptance|lease|leasing|upstart|lendingclub|prosper|best egg|avant|oportun|affirm|klarna|afterpay)\b/;
+const INSURANCE_RE = /\b(insurance|insur|geico|progressive|state farm|allstate|usaa|liberty mutual|farmers|nationwide|lemonade|root ins|metlife|aflac)\b/;
+const CARD_PAYMENT_RE = /(credit card|card pa?y?me?n?t|crd pmt|cc pmt|payment thank you|autopay payment|amex|american express|discover card|chase card|citi card|barclay|synchrony|capital one (?!auto))/;
+const OWN_TRANSFER_RE = /(transfer (to|from)|to savings|from savings|savings|vault|round ?up|internal transfer|between accounts)/;
+const billKey = (payee) => normPayee(payee).split(' ').filter(Boolean).slice(0, 3).join(' ');
+const prettyName = (payee) => {
+  let n = String(payee || '').replace(/[#*]?\b\d{4,}\b.*$/, '').replace(/\s{2,}/g, ' ').trim() || String(payee || '');
+  if (n === n.toUpperCase()) n = n.toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase());
+  return n;
+};
+function billEmoji(text, catName) {
+  if (/mortgage|hoa|rent/.test(text) || catName === 'Housing') return '🏠';
+  if (/student|navient|nelnet|mohela|sallie|aidvantage|edfinancial|great lakes/.test(text)) return '🎓';
+  if (INSURANCE_RE.test(text)) return '🛡️';
+  if (/auto|car|toyota|honda|ford|chevy|gm financial|nissan|hyundai|kia|tesla|bmw|santander|carmax|westlake|exeter|credit acceptance|ally/.test(text)) return '🚗';
+  if (/verizon|t mobile|at&t|att|sprint|mint mobile|visible|cricket|phone|wireless/.test(text)) return '📱';
+  if (/electric|power|energy|gas co|water|sewer|trash|utility|utilities/.test(text) || catName === 'Bills & Utilities') return '💡';
+  if (/internet|comcast|xfinity|spectrum|cox|fiber|wifi/.test(text)) return '🌐';
+  if (/gym|fitness|planet|peloton/.test(text)) return '🏋️';
+  if (LOAN_RE.test(text)) return '🧾';
+  return catName === 'Subscriptions' ? '🔁' : '📅';
+}
+function detectRecurring() {
+  const t0 = today(), groups = {};
+  for (const t of state.transactions) {
+    if (t.amount >= 0 || t.pending) continue;
+    const text = normPayee(t.payee) + ' ', c = cat(t.categoryId), pc = t.plaidCat || '';
+    if (c.kind === 'income') continue;
+    const isLoan = /^LOAN_PAYMENTS/.test(pc) && !/CREDIT_CARD/.test(pc) || LOAN_RE.test(text) || INSURANCE_RE.test(text);
+    if (/CREDIT_CARD_PAYMENT/.test(pc) || (CARD_PAYMENT_RE.test(text) && !isLoan)) continue;
+    if (c.kind === 'transfer' && !isLoan && (/TRANSFER_(IN|OUT)_(ACCOUNT_TRANSFER|SAVINGS|INVESTMENT)/.test(pc) || OWN_TRANSFER_RE.test(text))) continue;
+    const k = billKey(t.payee);
+    if (!k) continue;
+    (groups[k] ||= { list: [], isLoan: false, transfer: false }).list.push(t);
+    if (isLoan) groups[k].isLoan = true;
+    if (c.kind === 'transfer') groups[k].transfer = true;
+  }
+  const existing = state.recurrings.map((r) => r.match || billKey(r.name)).filter(Boolean);
+  const ignored = state.ignoredBills || {};
+  const out = [];
+  for (const [k, g] of Object.entries(groups)) {
+    if (ignored[k] || existing.some((e) => k.includes(e) || e.includes(k))) continue;
+    // One charge per day at most (a second same-day charge is usually a separate purchase).
+    const byDay = new Map();
+    g.list.sort((a, b) => a.date.localeCompare(b.date)).forEach((t) => { if (!byDay.has(t.date)) byDay.set(t.date, t); });
+    const list = [...byDay.values()];
+    if (list.length < 2) continue;
+    const gaps = list.slice(1).map((t, i) => daysFrom(list[i].date, t.date));
+    const med = median(gaps);
+    const freq = med >= 5 && med <= 9 ? 'weekly' : med >= 12 && med <= 17 ? 'biweekly' : med >= 25 && med <= 36 ? 'monthly'
+      : med >= 80 && med <= 100 ? 'quarterly' : med >= 340 && med <= 390 ? 'yearly' : null;
+    if (!freq) continue;
+    const need = { weekly: 4, biweekly: 3, monthly: 2, quarterly: 2, yearly: 2 }[freq];
+    if (list.length < need) continue;
+    // Regular: every gap is about one period (or two, if a month was skipped).
+    const P = FREQ_DAYS[freq], tol = Math.max(3, P * 0.2);
+    const regular = gaps.filter((gp) => { const m = Math.round(gp / P); return m >= 1 && m <= 2 && Math.abs(gp - m * P) <= tol * m; }).length;
+    if (regular < Math.max(1, gaps.length - 1) || (gaps.length >= 2 && regular / gaps.length < 0.75)) continue;
+    // Still active: the last payment was within about 1.6 periods.
+    const last = list[list.length - 1];
+    if (daysFrom(last.date, t0) > P * 1.6 + 5) continue;
+    // Amounts: steady (within 20%) or a bill whose amount varies (utilities, phone, loans with interest).
+    const amts = list.map((t) => -t.amount), recent = amts.slice(-3);
+    const m = median(amts), spread = Math.max(...amts) - Math.min(...amts);
+    const steady = amts.every((a) => Math.abs(a - m) <= Math.max(3, m * 0.2));
+    const c = cat(last.categoryId), text = normPayee(last.payee);
+    const billish = g.isLoan || ['Bills & Utilities', 'Housing', 'Subscriptions'].includes(c.name) || /utilit|electric|water|gas|phone|wireless|internet/.test(text);
+    const variable = !steady;
+    if (variable && !(billish && spread <= m * 1.5)) continue;
+    if (!g.isLoan && !billish && freq === 'weekly' && m < 15) continue; // weekly coffee isn't a bill
+    out.push({
+      key: k, match: k, suggKey: k, name: prettyName(last.payee), amount: round2(variable ? median(recent) : -last.amount), freq,
+      start: last.date, last: last.date, categoryId: last.categoryId, accountId: last.accountId, count: list.length, variable,
+      emoji: billEmoji(text, c.name),
+      reason: g.isLoan ? (INSURANCE_RE.test(text) ? 'Insurance' : 'Loan payment') : variable ? 'Amount varies' : g.transfer ? 'Regular transfer — a bill?' : '',
+    });
+  }
+  return out.sort((a, b) => monthlyEquivalent(b) - monthlyEquivalent(a)).slice(0, 25);
+}
+
 // ---------- Paycheck detection & schedule ----------
 function detectPaycheck() {
   const since = addDays(today(), -120), groups = {};
@@ -69,7 +152,7 @@ function goalsMonthly() {
   }, 0);
 }
 function lastPayment(r) {
-  const key = normPayee(r.name);
+  const key = r.match || normPayee(r.name);
   return state.transactions.filter((t) => t.amount < 0 && (t.recurringId === r.id || (key && normPayee(t.payee).includes(key))))
     .sort((a, b) => b.date.localeCompare(a.date))[0];
 }
@@ -185,6 +268,8 @@ function viewBills() {
       <div class="btn-row"><button class="btn small" data-a="newrec">+ Add a bill</button></div>
     </div>
 
+    ${billSuggestionsHTML()}
+
     <div class="section-title spread"><span>Paycheck plan</span>${p ? '<button class="link" data-a="paycheck">Edit paycheck</button>' : ''}</div>
     ${!p ? `<div class="card">
         <div class="title">💵 Plan each paycheck</div>
@@ -197,6 +282,16 @@ function viewBills() {
 
     <div class="section-title">Your bills</div>
     ${viewRecurring()}`;
+}
+
+function billSuggestionsHTML() {
+  const suggestions = detectRecurring();
+  return suggestions.length ? `<div class="section-title spread"><span>Possible bills found in your transactions (${suggestions.length})</span><button class="link" data-a="addallbills">Add all</button></div>
+      <ul class="list card" style="padding:2px 14px">${suggestions.map((s, i) => `<li data-sugg="${i}"><div class="emoji">${esc(s.emoji)}</div>
+        <div class="grow"><div class="title ellipsis">${esc(s.name)}</div>
+        <div class="sub">${s.variable ? 'about ' : ''}${money(s.amount)} · ${esc(FREQ_LABEL[s.freq] || s.freq)} · seen ${s.count}× · last ${esc(shortDate(s.last))}${s.last.slice(0, 4) !== today().slice(0, 4) ? ' ' + s.last.slice(0, 4) : ''}${s.reason ? ` · <b>${esc(s.reason)}</b>` : ''}</div></div>
+        <span class="pill">Add</span><button class="link muted" data-ignoresugg="${esc(s.key)}" aria-label="Not a bill" title="Not a bill">✕</button></li>`).join('')}</ul>
+      <p class="small muted">Tap one to check the details before adding. ✕ hides it if it isn’t a bill.</p>` : '';
 }
 
 function paycheckForm(prefill) {
@@ -234,7 +329,17 @@ function billsContext() {
 }
 
 function handleBillsClick(e) {
+  const ig = e.target.closest('[data-ignoresugg]');
+  if (ig) { (state.ignoredBills ||= {})[ig.dataset.ignoresugg] = 1; save(); render(); toast('Hidden — it won’t be suggested again'); return true; }
   const n = e.target.closest('[data-a]');
+  if (n?.dataset.a === 'addallbills') {
+    const list = detectRecurring();
+    if (!list.length || !confirm(`Add all ${list.length} as bills? You can edit or delete any of them later.`)) return true;
+    for (const s of list) state.recurrings.push({ id: uid(), name: s.name, emoji: s.emoji, amount: s.amount, freq: s.freq, start: s.start,
+      categoryId: s.categoryId, accountId: s.accountId, variable: s.variable, match: s.match });
+    save(); render(); toast(`Added ${list.length} bills`);
+    return true;
+  }
   if (!n) return false;
   if (n.dataset.a === 'paycheck') { paycheckForm(); return true; }
   if (n.dataset.a === 'usepay') { const d = detectPaycheck(); if (d) { delete d.count; state.paycheck = d; save(); render(); toast('Paycheck plan ready'); } return true; }
