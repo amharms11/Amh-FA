@@ -25,6 +25,13 @@ python3 -m http.server 8000   # then open http://localhost:8000
 
 > Data is stored per browser and per device. Use **Settings → Back up** regularly. Clearing Safari website data deletes it.
 
+## Easiest install (Mac)
+Open **Terminal** (press ⌘ + Space, type `Terminal`, press Return), paste this line, and press Return:
+```bash
+curl -fsSL https://raw.githubusercontent.com/amharms11/Amh-FA/main/install.sh | bash
+```
+That's it. An **AMH Finance** icon appears on your Desktop: double-click it whenever you want to use the app. Running the same line again updates the app.
+
 ## Automatic SoFi sync (purchases, deposits, balances)
 `connector/sofi_tracker.py` is a read-only Plaid connector. It can see balances and transactions but can never move money. Everything stays on your computer.
 

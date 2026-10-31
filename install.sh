@@ -55,6 +55,11 @@ cd "$HOME/AMH Finance/connector" || { echo "AMH Finance isn't installed. Run the
 PY="$HOME/AMH Finance/.venv/bin/python"
 clear
 printf "\033[1mAMH Finance\033[0m\n\n"
+if [ ! -f "$HOME/.sofi-tracker/config.env" ] && [ -f "$HOME/.sofi-tracker/.skip" ]; then
+  echo "SoFi isn't connected. To connect it now, type  k  and press Return (or wait 5 seconds)."
+  read -r -t 5 answer || true
+  [ "${answer:-}" = "k" ] || [ "${answer:-}" = "K" ] && rm -f "$HOME/.sofi-tracker/.skip"
+fi
 if [ ! -f "$HOME/.sofi-tracker/config.env" ] && [ ! -f "$HOME/.sofi-tracker/.skip" ]; then
   "$PY" sofi_tracker.py setup
 fi
