@@ -503,7 +503,7 @@ function checkingCard() {
 }
 
 // ---------- Budgets tab: bills inside each category ----------
-function categoryBillsHTML(c, ym) {
+function categoryBillsHTML(c, ym, part = 'button') {
   const bills = state.recurrings.filter((r) => r.categoryId === c.id);
   if (!bills.length) return '';
   const open = !!(state.ui.catBillsOpen || {})[c.id];
@@ -527,7 +527,73 @@ function categoryBillsHTML(c, ym) {
         <span class="num">${money(x.amount)}</span></li>`).join('')}</ul>
       ${b ? `<div class="sub" style="margin-top:4px">Bills use ${money(monthly, true)} of the ${money(b, true)} budget${monthly <= b ? ` → ${money(b - monthly, true)} for other ${esc(c.name.toLowerCase())} spending` : ` — <span class="bad">${money(monthly - b, true)} more than the budget</span>`}</div>` : ''}`;
   }
-  return `<button class="cat-bills-toggle" data-catbills="${c.id}" aria-expanded="${open}">🧾 ${bills.length} bill${bills.length === 1 ? '' : 's'} · ${money(monthly, true)}/mo <span class="chev ${open ? 'open' : ''}" aria-hidden="true">›</span></button>${rows}`;
+  if (part === 'list') return rows;
+  return `<button class="cat-bills-toggle" data-catbills="${c.id}" aria-expanded="${open}">🧾 ${bills.length} bill${bills.length === 1 ? '' : 's'} · ${money(monthly, true)}/mo <span class="chev ${open ? 'open' : ''}" aria-hidden="true">›</span></button>`;
+}
+
+// ---------- Budgets tab: every charge behind a category's number ----------
+function categoryCharges(c, ym) {
+  const out = [];
+  for (const t of txInMonth(ym)) {
+    const ps = parts(t).filter((p) => p.categoryId === c.id);
+    for (const p of ps) out.push({ t, amount: p.amount, split: !!t.splits?.length });
+  }
+  return out.sort((a, b) => b.t.date.localeCompare(a.t.date));
+}
+function categoryChargesHTML(c, ym, part = 'button') {
+  const list = categoryCharges(c, ym);
+  if (!list.length) return '';
+  const total = round2(-list.reduce((s, x) => s + x.amount, 0));
+  const open = !!(state.ui.catChargesOpen || {})[c.id];
+  if (part === 'button') {
+    return `<button class="cat-bills-toggle" data-catcharges="${c.id}" aria-expanded="${open}">💳 ${list.length} charge${list.length === 1 ? '' : 's'} · ${money(total, true)} <span class="chev ${open ? 'open' : ''}" aria-hidden="true">›</span></button>`;
+  }
+  if (!open) return '';
+  const opts = catOptions(['expense', 'income', 'transfer']);
+  const shown = list.slice(0, 150);
+  return `<ul class="cat-bills charge-list">${shown.map(({ t, amount, split }) => `<li data-tx="${t.id}">
+      <div class="grow" style="min-width:0"><div class="ellipsis">${esc(t.payee)}${t.pending ? ' <span class="pill warn">Pending</span>' : ''}</div>
+        <div class="muted small">${esc(shortDate(t.date))}${acct(t.accountId) ? ' · ' + esc(acct(t.accountId).name) : ''}${split ? ' · ✂️ part of a split' : ''}</div></div>
+      <span class="num ${amount > 0 ? 'good' : ''}">${amount > 0 ? '+' : ''}${money(Math.abs(amount))}</span>
+      ${split ? '' : `<select class="recat" data-recat="${t.id}" aria-label="Change category for ${esc(t.payee)}">${opts.map((o) => `<option value="${esc(o.value)}" ${o.value === c.id ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>`}
+    </li>`).join('')}</ul>
+    <div class="sub" style="margin-top:4px">These add up to ${money(total)}${list.length > shown.length ? ` · showing the latest ${shown.length}` : ''}. Pick a new category to move a charge — the app can remember it for that store.</div>`;
+}
+const storeKey = (payee) => normPayee(payee).split(' ').filter(Boolean).slice(0, 2).join(' ');
+function onRecategorize(sel) {
+  const t = state.transactions.find((x) => x.id === sel.dataset.recat);
+  const to = cat(sel.value);
+  render(); // put the picker back until a choice is made
+  if (!t || !to.id || t.categoryId === to.id) return;
+  const key = storeKey(t.payee);
+  const others = (k) => state.transactions.filter((x) => x !== t && !x.splits?.length && k && normPayee(x.payee).includes(k) && x.categoryId !== to.id);
+  openSheet(`Move to ${to.emoji} ${to.name}`, `
+    <div class="card small"><b>${esc(t.payee)}</b> · ${money(Math.abs(t.amount))} · ${esc(shortDate(t.date))}<br><span class="muted">Now in ${esc(cat(t.categoryId).emoji)} ${esc(cat(t.categoryId).name)}</span></div>
+    <label class="field"><span>Remember for charges whose name contains</span><input data-key value="${esc(key)}"></label>
+    <p class="small muted" data-others style="margin-top:-4px"></p>
+    <button class="btn" data-mode="future">This charge + future ones from this store</button>
+    <div class="btn-row"><button class="btn secondary" data-mode="all">Also move past charges from this store</button></div>
+    <div class="btn-row"><button class="btn secondary" data-mode="one">Only this charge</button></div>`, (sheet) => {
+    const keyInput = $('[data-key]', sheet), info = $('[data-others]', sheet);
+    const showCount = () => {
+      const n = others(normPayee(keyInput.value)).length;
+      info.textContent = n ? `${n} other past charge${n === 1 ? '' : 's'} match “${normPayee(keyInput.value)}”.` : 'No other past charges match.';
+      $('[data-mode="all"]', sheet).style.display = n ? '' : 'none';
+    };
+    showCount(); keyInput.addEventListener('input', showCount);
+    sheet.addEventListener('click', (e) => {
+      const mode = e.target.closest('[data-mode]')?.dataset.mode;
+      if (!mode) return;
+      const k = normPayee(keyInput.value);
+      if (mode !== 'one' && k.length < 3) { toast('Type at least 3 letters of the store name'); return; }
+      t.categoryId = to.id;
+      let moved = 0;
+      if (mode !== 'one') state.rules[k] = to.id;
+      if (mode === 'all') for (const x of others(k)) { x.categoryId = to.id; moved++; }
+      save(); closeSheet(); render();
+      toast(mode === 'one' ? `Moved to ${to.name}` : `Moved${moved ? ` ${moved + 1} charges` : ''} — future “${k}” charges go to ${to.name}`);
+    });
+  });
 }
 
 // ---------- One-time data updates ----------
@@ -651,6 +717,9 @@ function openPasteBills() {
 }
 
 function handleBillsClick(e) {
+  if (e.target.closest('select.recat')) return true; // let the picker work without opening the budget
+  const cc = e.target.closest('[data-catcharges]');
+  if (cc) { const k = cc.dataset.catcharges; (state.ui.catChargesOpen ||= {})[k] = !state.ui.catChargesOpen[k]; save(); render(); return true; }
   const cb = e.target.closest('[data-catbills]');
   if (cb) { const k = cb.dataset.catbills; (state.ui.catBillsOpen ||= {})[k] = !state.ui.catBillsOpen[k]; save(); render(); return true; }
   const bg = e.target.closest('[data-bankgroup]');

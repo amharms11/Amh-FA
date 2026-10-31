@@ -292,3 +292,7 @@ svg.chart text { fill: var(--muted); font-size: 10px; }
 .cat-bills li { display: flex; align-items: center; gap: 8px; padding: 6px 2px; font-size: 13.5px; border: 0 !important; cursor: pointer; }
 .list li[data-cat] { align-items: flex-start; }
 .list li[data-cat] > .emoji { margin-top: 2px; }
+
+.cat-toggles { display: flex; flex-wrap: wrap; gap: 6px; }
+.charge-list li { gap: 8px; }
+.recat { max-width: 118px; font-size: 12px; padding: 5px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); flex: none; }

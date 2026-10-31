@@ -151,10 +151,20 @@ function monthTotals(ym) {
 }
 const totalBudget = () => expenseCats().reduce((s, c) => s + (+c.budget || 0), 0);
 
+/** Your saved category rule for a store: an exact match, or the longest saved name the payee contains. */
+function ruleFor(payee) {
+  const n = normPayee(payee);
+  if (state.rules[n] && cat(state.rules[n]).id) return state.rules[n];
+  let best = null;
+  for (const [key, cid] of Object.entries(state.rules)) {
+    if (key.length >= 3 && n.includes(key) && cat(cid).id && (!best || key.length > best[0].length)) best = [key, cid];
+  }
+  return best ? best[1] : null;
+}
 function guessCategory(payee) {
   const n = normPayee(payee);
-  if (state.rules[n]) return state.rules[n];
-  for (const [key, cid] of Object.entries(state.rules)) if (key.length > 3 && n.includes(key)) return cid;
+  const rule = ruleFor(payee);
+  if (rule) return rule;
   for (const [re, name] of KEYWORD_HINTS) if (re.test(n + ' ')) {
     const c = state.categories.find((x) => x.name === name);
     if (c) return c.id;
@@ -595,7 +605,7 @@ const PLAID_CATEGORY_MAP = [
   [/^BANK_FEES|^GENERAL_SERVICES/, 'Bills & Utilities'],
 ];
 function categorizePlaid(payee, p) {
-  const rule = state.rules[normPayee(payee)];
+  const rule = ruleFor(payee);
   if (rule) return rule;
   for (const code of [p.subcategory, p.category]) {
     if (!code) continue;
@@ -990,7 +1000,8 @@ function viewBudgets() {
     return `<li data-cat="${c.id}" style="flex-wrap:wrap"><div class="emoji">${esc(c.emoji)}</div>
       <div class="grow"><div class="spread"><span class="title ellipsis">${esc(c.name)}</span><span class="num small">${money(spent, true)}${b ? ` <span class="muted">/ ${money(b, true)}</span>` : ''}</span></div>
       ${b ? `<div class="bar ${cls}"><i style="width:${Math.min(100, pct * 100)}%"></i></div><div class="sub">${spent > b ? `<span class="bad">${money(spent - b, true)} over</span>` : `${money(b - spent, true)} left`}</div>` : '<div class="sub">No budget — tap to set</div>'}
-      ${categoryBillsHTML(c, ym)}</div></li>`;
+      <div class="cat-toggles">${categoryBillsHTML(c, ym, 'button')}${categoryChargesHTML(c, ym, 'button')}</div>
+      ${categoryBillsHTML(c, ym, 'list')}${categoryChargesHTML(c, ym, 'list')}</div></li>`;
   };
   const goals = state.goals;
   return `
@@ -1123,6 +1134,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if ((n = el('[data-range] button'))) { state.ui.nwRange = +n.dataset.v; save(); return render(); }
     if ((n = el('[data-goto]'))) return goto(n.dataset.goto);
   });
+  view.addEventListener('change', (e) => { if (e.target.matches('[data-recat]')) onRecategorize(e.target); });
   view.addEventListener('input', (e) => {
     if (e.target.matches('[data-search]')) {
       state.ui.txQuery = e.target.value;
