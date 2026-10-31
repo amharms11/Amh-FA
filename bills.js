@@ -281,8 +281,118 @@ function viewBills() {
         ${detected ? `<p class="small">We found it in your deposits: <b>${esc(detected.name)}</b>, about <b>${money(detected.amount)}</b>, ${esc(PAY_FREQS[detected.freq].label.toLowerCase())}${detected.freq === 'semimonthly' ? ` (around the ${ordinal(detected.day1)} and ${detected.day2 >= 28 ? 'end of the month' : 'the ' + ordinal(detected.day2)})` : ''}.</p>
           <button class="btn" data-a="usepay">Use this paycheck</button><div class="btn-row"><button class="btn secondary" data-a="paycheck">Change details</button></div>`
           : '<button class="btn" data-a="paycheck">Set up my paycheck</button>'}
-      </div>` : plan ? `${plan.checks.map(paycheckCard).join('')}
+      </div>` : (p.method || 'even') === 'even' ? methodPicker(p) + evenPlanHTML() : plan ? `${methodPicker(p)}
+      <p class="small muted" style="margin-top:0">Each bill is paid from the paycheck before its due date. Simple, but paychecks can be uneven — if any show “Short by”, switch to <b>Same amount each paycheck</b>.</p>
+      ${plan.checks.map(paycheckCard).join('')}
       <p class="small muted">How this works: each bill is paid from the last paycheck that arrives at least ${+p.buffer || 0} day${+p.buffer === 1 ? '' : 's'} before it’s due. If a paycheck would come up short, some bills are moved to the paycheck before it (“Pay early”), or extra from an earlier paycheck is kept to cover it. Yearly and quarterly bills are saved for a little at a time. Everyday spending comes from your Budgets tab.</p>` : ''}`;
+}
+
+// ---------- "Same amount every paycheck" method (Bills vault) ----------
+function billsDueBetween(from, to) {
+  const out = [];
+  for (const r of state.recurrings) {
+    for (let ym = monthOf(from); `${ym}-01` <= to; ym = addMonths(ym, 1)) {
+      for (const d of occurrencesInMonth(r, ym)) if (d >= from && d <= to && !findPayment(r, d)) out.push({ r, date: d, amount: r.amount });
+    }
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+function buildEvenPlan() {
+  const p = state.paycheck;
+  if (!p?.amount) return null;
+  const py = perYear(p), t0 = today(), horizon = addDays(t0, 182);
+  const contribution = round2(Math.ceil(((monthlyBills() * 12) / py) * 100) / 100);
+  const spending = round2((everydayMonthly() * 12) / py);
+  const room = p.amount - contribution - spending;
+  const target = +p.save > 0 ? +p.save : Math.min((goalsMonthly() * 12) / py, Math.max(0, room));
+  const savings = round2(Math.max(0, Math.min(target, room)));
+  const left = round2(p.amount - contribution - spending - savings);
+  // Simulate the vault: +contribution every payday, −each bill on its due date (payday counted first).
+  const pays = paydays(p, addDays(t0, 1), horizon);
+  const bills = billsDueBetween(t0, horizon);
+  const events = pays.map((d) => ({ date: d, amt: contribution, pay: true })).concat(bills.map((b) => ({ date: b.date, amt: -b.amount })))
+    .sort((a, b) => a.date.localeCompare(b.date) || (a.pay ? -1 : 1));
+  let bal = 0, min = 0, minDate = t0;
+  const raw = [{ date: t0, value: 0 }];
+  for (const e of events) { bal += e.amt; if (bal < min) { min = bal; minDate = e.date; } raw.push({ date: e.date, value: bal }); }
+  const cushion = min < 0 ? Math.ceil(-min / 50) * 50 : 0;
+  const points = raw.map((x) => ({ date: x.date, value: round2(x.value + cushion) }));
+  const checks = pays.slice(0, 4).map((d, i) => {
+    const next = pays[i + 1] || addDays(d, Math.round(365 / py));
+    const due = bills.filter((b) => b.date >= d && b.date < next);
+    return { date: d, due, dueTotal: round2(due.reduce((s, b) => s + b.amount, 0)) };
+  });
+  const beforeFirst = bills.filter((b) => b.date < (pays[0] || horizon));
+  return { p, py, contribution, spending, savings, left, cushion, minDate, points, checks, beforeFirst };
+}
+function billLines(list) {
+  return `<ul class="list bill-list" style="margin-left:0">${list.map((b) => `<li data-rec="${b.r.id}" data-date="${b.date}"><span class="bill-emoji">${esc(b.r.emoji)}</span><span class="grow ellipsis">${esc(b.r.name)} <span class="muted">· ${esc(shortDate(b.date))}</span></span><span class="num">${money(b.amount)}</span></li>`).join('')}</ul>`;
+}
+function evenPlanHTML() {
+  const e = buildEvenPlan();
+  if (!e) return '';
+  const splitText = e.p.freq === 'semimonthly' ? 'half of your monthly bills' : e.p.freq === 'monthly' ? 'all of your monthly bills'
+    : `your monthly bills × 12 ÷ ${e.py} paychecks a year`;
+  const c = { amount: e.p.amount, billsTotal: e.contribution, setAsideTotal: 0, spending: e.spending, savings: e.savings, holdForward: 0, left: e.left };
+  const row = (color, label, amount) => `<div class="spread small alloc-row"><span><i class="dot" style="background:${color}"></i>${label}</span><span class="num">${money(amount)}</span></div>`;
+  return `<div class="card">
+      <div class="small muted">Every paycheck (${money(e.p.amount)})</div>
+      <div class="mid">Move ${money(e.contribution)} to a “Bills” vault</div>
+      <p class="small muted" style="margin:4px 0 0">That’s ${splitText}. Pay every bill from the vault, and your bills are covered no matter when they’re due.</p>
+      ${allocBar(c)}
+      ${row(ALLOC_COLORS.bills, '<b>To your Bills vault</b>', e.contribution)}
+      ${row(ALLOC_COLORS.spending, 'Everyday spending (groceries, gas, fun…)', e.spending)}
+      ${e.savings ? row(ALLOC_COLORS.savings, 'Savings & goals', e.savings) : ''}
+      <div class="spread small alloc-row"><b>${e.left >= 0 ? 'Left over' : 'Short by'}</b><b class="num ${e.left >= 0 ? 'good' : 'bad'}">${money(Math.abs(e.left))}</b></div>
+      ${e.left < 0 ? '<p class="small bad" style="margin:4px 0 0">Your paycheck doesn’t cover bills plus everyday budgets. Lower some everyday budgets on the Budgets tab, or look for bills to cut.</p>' : ''}
+    </div>
+    <div class="card">
+      ${e.cushion ? `<div class="title">🛟 One-time starter: put ${money(e.cushion, true)} in the vault</div>
+        <p class="small muted" style="margin:4px 0 8px">Bills due before the vault fills up need a head start. With this cushion the vault never runs out — its lowest point is around ${esc(shortDate(e.minDate))}. You only do this once.</p>`
+        : '<div class="title">✓ No starter cushion needed</div><p class="small muted" style="margin:4px 0 8px">Your paychecks arrive in time for every bill.</p>'}
+      <div class="small muted">Bills vault balance, next 6 months${e.cushion ? ` (starting with ${money(e.cushion, true)})` : ''}</div>
+      ${line(e.points, 90)}
+    </div>
+    ${e.beforeFirst.length ? `<div class="card"><div class="small muted">Due before your next payday — paid from the starter cushion</div>${billLines(e.beforeFirst)}</div>` : ''}
+    ${e.checks.map((k) => `<div class="card"><div class="spread"><div><div class="small muted">Paycheck · ${esc(dayLabel(k.date))}</div><div class="title">+ ${money(e.contribution)} to the vault</div></div>
+        <div style="text-align:right"><div class="small muted">Bills before next payday</div><div class="title num">${money(k.dueTotal)}</div></div></div>
+      ${k.due.length ? billLines(k.due) : '<p class="small muted">No bills due in this stretch.</p>'}</div>`).join('')}
+    <p class="small muted">Why this works: some paychecks have far more bills due than others. Putting the same amount in every time evens that out — the vault fills up during light stretches and pays out during heavy ones. If SoFi lets you schedule a recurring transfer to a vault on payday, set it for ${money(e.contribution)} and this runs on its own.</p>`;
+}
+function methodPicker(p) {
+  const m = p.method || 'even';
+  return `<div class="segmented" data-method-seg style="margin-bottom:8px">
+    <button data-v="even" class="${m === 'even' ? 'on' : ''}">Same amount each paycheck ⭐</button>
+    <button data-v="duedate" class="${m === 'duedate' ? 'on' : ''}">By due date</button></div>`;
+}
+
+// ---------- Bills on the Budgets tab ----------
+function billsNeedFor(c) { return state.recurrings.filter((r) => r.categoryId === c.id).reduce((s, r) => s + monthlyEquivalent(r), 0); }
+function billsBudgetCard(ym) {
+  if (!state.recurrings.length) return '';
+  let due = 0, paid = 0;
+  for (const r of state.recurrings) for (const d of occurrencesInMonth(r, ym)) {
+    due += r.amount;
+    const t = findPayment(r, d);
+    if (t) paid += Math.abs(t.amount);
+  }
+  const short = expenseCats().filter((c) => { const need = billsNeedFor(c); return need > 0 && (+c.budget || 0) < need - 0.5; });
+  return `<div class="card">
+    <div class="spread"><div><div class="muted small">🧾 Bills this month</div><div class="mid">${money(paid, true)} <span class="muted small">paid of ${money(due, true)}</span></div></div><button class="link" data-goto="recurring">Bills tab</button></div>
+    <div class="bar ${paid >= due ? 'good' : ''}"><i style="width:${due ? Math.min(100, (paid / due) * 100) : 0}%"></i></div>
+    <div class="small muted" style="margin-top:4px">${money(monthlyBills(), true)}/mo across ${state.recurrings.length} bills · ${money(Math.max(0, due - paid), true)} still to pay this month</div>
+    ${short.length ? `<div class="small bad" style="margin-top:8px">${short.map((c) => `${esc(c.name)} (bills ${money(billsNeedFor(c), true)}, budget ${money(+c.budget || 0, true)})`).join(', ')} — the budget doesn’t cover the bills in it.</div>
+      <div class="btn-row"><button class="btn small" data-a="coverbills">Raise budgets to cover my bills</button></div>` : '<div class="small good" style="margin-top:6px">✓ Your category budgets cover your bills.</div>'}
+  </div>`;
+}
+function coverBillsInBudgets() {
+  const changed = [];
+  for (const c of expenseCats()) {
+    const need = billsNeedFor(c);
+    if (need > 0 && (+c.budget || 0) < need - 0.5) { c.budget = Math.ceil(need / 5) * 5; changed.push(`${c.name} → ${money(c.budget, true)}`); }
+  }
+  save(); render();
+  toast(changed.length ? `Updated: ${changed.join(', ')}` : 'Your budgets already cover your bills');
 }
 
 function billSuggestionsHTML() {
@@ -326,6 +436,8 @@ function billsContext() {
   const L = [`\nPAYCHECK: ${money(plan.p.amount)} take-home, ${PAY_FREQS[plan.p.freq].label.toLowerCase()}; bills paid ${plan.p.buffer} days before due.`,
     'PAYCHECK PLAN (payday | amount | bills | set-asides | everyday spending | savings | left over | bills paid from it)'];
   for (const c of plan.checks) L.push(`${c.date} | ${money(c.amount)} | ${money(c.billsTotal)} | ${money(c.setAsideTotal)} | ${money(c.spending)} | ${money(c.savings)} | ${money(c.left)} | ${c.bills.map((b) => `${b.r.name} ${money(b.amount)} due ${b.due}${b.paid ? ' (paid)' : ''}`).join('; ')}`);
+  const ev = buildEvenPlan();
+  if (ev) L.push(`BILLS VAULT METHOD (${(plan.p.method || 'even') === 'even' ? 'the user\'s chosen method' : 'alternative'}): move ${money(ev.contribution)} to a Bills vault every paycheck; one-time starter cushion ${money(ev.cushion)}; everyday spending ${money(ev.spending)} and savings ${money(ev.savings)} per paycheck; left over ${money(ev.left)}.`);
   return L.join('\n');
 }
 
@@ -423,10 +535,13 @@ function openPasteBills() {
 }
 
 function handleBillsClick(e) {
+  const ms = e.target.closest('[data-method-seg] button');
+  if (ms && state.paycheck) { state.paycheck.method = ms.dataset.v; save(); render(); return true; }
   const ig = e.target.closest('[data-ignoresugg]');
   if (ig) { (state.ignoredBills ||= {})[ig.dataset.ignoresugg] = 1; save(); render(); toast('Hidden — it won’t be suggested again'); return true; }
   const n = e.target.closest('[data-a]');
   if (n?.dataset.a === 'pastebills') { openPasteBills(); return true; }
+  if (n?.dataset.a === 'coverbills') { coverBillsInBudgets(); return true; }
   if (n?.dataset.a === 'addallbills') {
     const list = detectRecurring();
     if (!list.length || !confirm(`Add all ${list.length} as bills? You can edit or delete any of them later.`)) return true;

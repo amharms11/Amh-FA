@@ -990,6 +990,7 @@ function viewBudgets() {
       <div class="spread small" style="margin-top:10px"><span class="muted">Income</span><span class="num good">${money(income)}</span></div>
       <div class="spread small"><span class="muted">Saved (income − spending)</span><span class="num ${income - spent >= 0 ? 'good' : 'bad'}">${signed(round2(income - spent))}</span></div>
     </div>
+    ${billsBudgetCard(ym)}
     <div class="section-title">Categories</div>
     <ul class="list card" style="padding:2px 14px">${cats.map(row).join('')}</ul>
     <button class="btn secondary" data-a="newcat">Add category</button>
