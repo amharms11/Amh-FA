@@ -25,7 +25,35 @@ python3 -m http.server 8000   # then open http://localhost:8000
 
 > Data is stored per browser and per device. Use **Settings → Back up** regularly. Clearing Safari website data deletes it.
 
-## Getting your transactions in
+## Automatic SoFi sync (purchases, deposits, balances)
+`connector/sofi_tracker.py` is a read-only Plaid connector that runs on your computer. It can see balances and transactions but can never move money. It also works as an MCP server, so Claude Desktop can answer questions about your spending.
+
+**One-time setup on your Mac:**
+```bash
+cd connector
+pip install -r requirements.txt
+export PLAID_CLIENT_ID=...  PLAID_SECRET=...   # from your Plaid dashboard
+python sofi_tracker.py link                    # sign in to SoFi in the browser
+```
+
+**Each time you want fresh data:**
+```bash
+python sofi_tracker.py export
+```
+This pulls new transactions from SoFi and writes `iCloud Drive/AMH Finance/sofi-export.json`. In Claude Desktop you can also just ask it to "export for the app".
+
+Then on your iPhone, open the app → ⚙️ Settings → **Import SoFi sync file** and pick that file in Files. The first time, you choose whether each SoFi account links to an existing account in the app or is created new.
+
+What the import does:
+- Adds new purchases and deposits, using Plaid's categories (groceries, dining, paycheck, check deposits, transfers…). Categories you have taught the app take priority.
+- Marks pending charges. When one posts, the pending copy is replaced, so nothing is counted twice.
+- Sets each account's balance to what SoFi reports.
+- Keeps your edits (category, payee, notes) on transactions it has already imported, and can be re-run safely.
+- Recognizes transactions you already entered by hand or from a CSV, so they are not duplicated.
+
+The export file contains your financial data. It is stored in iCloud Drive, and with Advanced Data Protection turned on it is end-to-end encrypted. `.gitignore` keeps export files and tokens out of this repo.
+
+## Getting your transactions in manually
 Most banks and card issuers can export transactions as CSV from their website. Use **Settings → Import bank CSV**, choose the account, and confirm which columns hold the date, description and amount.
 
 Linking banks automatically (like commercial apps do) requires a paid aggregator such as Plaid plus a backend server to hold the API secrets. That is out of scope for this private, serverless version.

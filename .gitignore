@@ -1,0 +1,6 @@
+# Never commit bank data or tokens
+*export*.json
+item.json
+transactions.json
+.env
+__pycache__/

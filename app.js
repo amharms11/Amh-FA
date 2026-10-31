@@ -585,12 +585,131 @@ function download(name, text, type) {
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
 }
 
+// ---------- Bank sync import (SoFi Tracker / Plaid export) ----------
+// Plaid's convention: amount > 0 is money OUT. This app uses amount < 0 for money out.
+const PLAID_CATEGORY_MAP = [
+  [/^FOOD_AND_DRINK_GROCERIES/, 'Groceries'], [/^FOOD_AND_DRINK/, 'Dining'],
+  [/^RENT_AND_UTILITIES_RENT/, 'Housing'], [/^LOAN_PAYMENTS_MORTGAGE/, 'Housing'], [/^RENT_AND_UTILITIES/, 'Bills & Utilities'],
+  [/^TRANSPORTATION/, 'Transport'], [/^TRAVEL/, 'Travel'],
+  [/^GENERAL_MERCHANDISE|^HOME_IMPROVEMENT/, 'Shopping'], [/^ENTERTAINMENT/, 'Entertainment'],
+  [/^MEDICAL|^PERSONAL_CARE_GYMS/, 'Health'], [/^PERSONAL_CARE/, 'Personal Care'],
+  [/^GOVERNMENT_AND_NON_PROFIT_DONATIONS/, 'Gifts & Donations'],
+  [/^INCOME|^TRANSFER_IN_DEPOSIT/, 'Income'],
+  [/^TRANSFER_IN|^TRANSFER_OUT|^LOAN_PAYMENTS/, 'Transfer'],
+  [/^BANK_FEES|^GENERAL_SERVICES/, 'Bills & Utilities'],
+];
+function categorizePlaid(payee, p) {
+  const rule = state.rules[normPayee(payee)];
+  if (rule) return rule;
+  for (const code of [p.subcategory, p.category]) {
+    if (!code) continue;
+    const hit = PLAID_CATEGORY_MAP.find(([re]) => re.test(code));
+    const c = hit && state.categories.find((x) => x.name === hit[1]);
+    if (c) return c.id;
+  }
+  return guessCategory(payee);
+}
+function plaidAccountType(a) {
+  const t = String(a.type || '').toLowerCase(), s = String(a.subtype || '').toLowerCase();
+  if (t.includes('credit')) return 'credit';
+  if (t.includes('loan')) return 'loan';
+  if (t.includes('investment') || t.includes('brokerage')) return /401|403|457|ira|roth|retire|pension/.test(s) ? 'retirement' : 'investment';
+  if (s.includes('saving') || s.includes('money market') || s === 'cd') return 'savings';
+  return 'checking';
+}
+/** Accepts the SoFi Tracker export file, or its raw ~/.sofi-tracker/transactions.json store. */
+function parsePlaidFile(data) {
+  if (Array.isArray(data?.transactions) && Array.isArray(data?.accounts) && !Array.isArray(data?.categories)) {
+    return { accounts: data.accounts, txns: data.transactions, meta: data };
+  }
+  if (data && typeof data.txns === 'object' && !Array.isArray(data.txns)) {
+    const accounts = Array.isArray(data.account_details) ? data.account_details
+      : Object.entries(data.accounts || {}).map(([account_id, name]) => ({ account_id, name }));
+    return { accounts, txns: Object.values(data.txns), meta: data };
+  }
+  return null;
+}
+function importPlaidFlow(data) {
+  const parsed = parsePlaidFile(data);
+  if (!parsed) { toast('Not a SoFi Tracker export file'); return; }
+  const unmapped = parsed.accounts.filter((a) => !state.accounts.some((x) => x.plaidId === a.account_id));
+  if (!unmapped.length) { applyPlaid(parsed); save(); render(); return; }
+  const free = state.accounts.filter((x) => !x.plaidId);
+  openForm({
+    title: 'Match bank accounts',
+    saveLabel: 'Import',
+    extraHTML: '<p class="muted small">New accounts from your bank. Link each to an account you already track, or create it. This is remembered for future syncs.</p>',
+    fields: unmapped.map((a) => ({
+      key: a.account_id, type: 'select',
+      label: `${a.name}${a.mask ? ' ••' + a.mask : ''}${a.current != null ? ' — ' + money(a.current) : ''}`,
+      options: [{ value: '', label: '➕ Create new account' }, ...free.map((x) => ({ value: x.id, label: `Link to: ${x.name}` }))],
+    })),
+    onSave(v) {
+      for (const a of unmapped) {
+        const existing = v[a.account_id] && acct(v[a.account_id]);
+        if (existing) existing.plaidId = a.account_id;
+        else state.accounts.push({ id: uid(), plaidId: a.account_id, name: a.name || 'Bank account', institution: parsed.meta.source || 'SoFi', type: plaidAccountType(a), opening: 0 });
+      }
+      if (!state.setup) state.setup = true;
+      applyPlaid(parsed);
+    },
+  });
+}
+function applyPlaid({ accounts, txns, meta }) {
+  const byPlaid = (pid) => state.accounts.find((a) => a.plaidId === pid);
+  const fileIds = new Set(txns.map((t) => t.id));
+  const fileAccts = new Set(accounts.map((a) => a.account_id).concat(txns.map((t) => t.account_id)));
+  let added = 0, updated = 0, removed = 0;
+  // Drop synced transactions the bank no longer reports (e.g. pending charges that posted under a new id).
+  state.transactions = state.transactions.filter((t) => {
+    if (t.source !== 'plaid' || !t.extId) return true;
+    const a = acct(t.accountId);
+    if (a && fileAccts.has(a.plaidId) && !fileIds.has(t.extId)) { removed++; return false; }
+    return true;
+  });
+  const known = new Map(state.transactions.filter((t) => t.extId).map((t) => [t.extId, t]));
+  for (const p of txns) {
+    const a = byPlaid(p.account_id);
+    if (!a || !p.date || p.amount == null) continue;
+    const amount = round2(-Number(p.amount));
+    const pending = !!p.pending;
+    const ex = known.get(p.id);
+    if (ex) { // keep the user's category/payee/note edits
+      if (ex.date !== p.date || ex.amount !== amount || !!ex.pending !== pending) updated++;
+      Object.assign(ex, { date: p.date, amount, pending, accountId: a.id });
+      continue;
+    }
+    const dup = state.transactions.find((t) => !t.extId && t.accountId === a.id && t.date === p.date && t.amount === amount);
+    if (dup) { Object.assign(dup, { extId: p.id, source: 'plaid', pending }); known.set(p.id, dup); updated++; continue; }
+    const payee = p.merchant || p.name || 'Unknown';
+    const t = { id: uid(), extId: p.id, source: 'plaid', date: p.date, amount, payee, categoryId: categorizePlaid(payee, p), accountId: a.id, note: '', pending };
+    state.transactions.push(t); known.set(p.id, t); added++;
+  }
+  // Use the bank's reported balance as the source of truth.
+  for (const pa of accounts) {
+    const a = byPlaid(pa.account_id);
+    if (!a || pa.current == null) continue;
+    const desired = ACCOUNT_TYPES[a.type]?.liability ? -Math.abs(pa.current) : Number(pa.current);
+    const txSum = state.transactions.reduce((s, t) => (t.accountId === a.id ? s + t.amount : s), 0);
+    a.opening = round2(desired - txSum);
+  }
+  state.sync = { source: meta.source || 'SoFi', at: meta.last_sync || meta.exported_at || new Date().toISOString(), imported: new Date().toISOString(), added, updated, removed };
+  toast(`Synced: ${added} new, ${updated} updated${removed ? `, ${removed} removed` : ''}`);
+}
+function syncLabel() {
+  if (!state.sync) return '';
+  const d = new Date(state.sync.at);
+  return `${esc(state.sync.source)} data from ${isNaN(d) ? esc(state.sync.at) : d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`;
+}
+
 // ---------- Settings ----------
 function openSettings() {
   const ruleCount = Object.keys(state.rules).length;
   openSheet('Settings', `
     <div class="card"><h2>Data</h2>
-      <button class="btn" data-a="csv">Import bank CSV</button>
+      <button class="btn" data-a="plaid">Import SoFi sync file</button>
+      ${state.sync ? `<p class="muted small" style="margin:6px 0 0">Last sync: ${syncLabel()}</p>` : ''}
+      <div class="btn-row"><button class="btn secondary" data-a="csv">Import bank CSV</button></div>
       <div class="btn-row"><button class="btn secondary" data-a="export">Back up (JSON)</button><button class="btn secondary" data-a="restore">Restore</button></div>
       <div class="btn-row"><button class="btn secondary" data-a="excsv">Export transactions CSV</button></div>
       <p class="muted small">Your data is stored only on this device, in this browser. Back up regularly — clearing Safari website data erases it.</p>
@@ -613,6 +732,7 @@ function openSettings() {
     });
     sheet.addEventListener('click', (e) => {
       const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return;
+      if (a === 'plaid') { closeSheet(); pickFile('.json,application/json', (txt) => { try { importPlaidFlow(JSON.parse(txt)); } catch { toast('Could not read that file'); } }); }
       if (a === 'csv') { closeSheet(); pickFile('.csv,text/csv', importCSVFlow); }
       if (a === 'export') download(`amh-finance-backup-${today()}.json`, JSON.stringify(state, null, 1), 'application/json');
       if (a === 'excsv') {
@@ -623,6 +743,7 @@ function openSettings() {
       if (a === 'restore') pickFile('.json,application/json', (txt) => {
         try {
           const s = JSON.parse(txt);
+          if (parsePlaidFile(s)) { closeSheet(); importPlaidFlow(s); return; }
           if (!Array.isArray(s.transactions) || !Array.isArray(s.categories)) throw new Error('bad file');
           if (!confirm('Replace all current data with this backup?')) return;
           state = { ...blankState(), ...s, ui: { ...blankState().ui, ...(s.ui || {}) } };
@@ -659,7 +780,7 @@ function openRules() {
 const txRow = (t) => {
   const c = cat(t.categoryId), a = acct(t.accountId);
   return `<li data-tx="${t.id}"><div class="emoji">${esc(c.emoji)}</div>
-    <div class="grow"><div class="title ellipsis">${esc(t.payee)}</div><div class="sub ellipsis">${esc(c.name)}${a ? ' · ' + esc(a.name) : ''}${t.note ? ' · ' + esc(t.note) : ''}</div></div>
+    <div class="grow"><div class="title ellipsis">${esc(t.payee)}</div><div class="sub ellipsis">${esc(c.name)}${a ? ' · ' + esc(a.name) : ''}${t.pending ? ' · <span class="pill warn">Pending</span>' : ''}${t.note ? ' · ' + esc(t.note) : ''}</div></div>
     <div class="num ${t.amount > 0 ? 'good' : ''}">${t.amount > 0 ? '+' : ''}${money(Math.abs(t.amount))}</div></li>`;
 };
 
@@ -736,7 +857,9 @@ function viewTx() {
   const f = state.ui.txFilter;
   let list = [...state.transactions].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
   if (f === 'uncat') list = list.filter((t) => !t.categoryId || cat(t.categoryId).name === 'Other');
-  else if (f === 'income') list = list.filter((t) => t.amount > 0);
+  else if (f === 'income') list = list.filter((t) => t.amount > 0 && cat(t.categoryId).kind !== 'transfer');
+  else if (f === 'out') list = list.filter((t) => t.amount < 0 && cat(t.categoryId).kind !== 'transfer');
+  else if (f === 'pending') list = list.filter((t) => t.pending);
   else if (f.startsWith('c:')) list = list.filter((t) => t.categoryId === f.slice(2));
   else if (f.startsWith('a:')) list = list.filter((t) => t.accountId === f.slice(2));
   if (q) list = list.filter((t) => (t.payee + ' ' + (t.note || '') + ' ' + cat(t.categoryId).name).toLowerCase().includes(q) || String(Math.abs(t.amount)).includes(q));
@@ -744,12 +867,14 @@ function viewTx() {
   const groups = {};
   shown.forEach((t) => (groups[t.date] ||= []).push(t));
   const total = list.reduce((s, t) => s + t.amount, 0);
-  const chips = [['all', 'All'], ['uncat', 'Needs review'], ['income', 'Income'],
+  const chips = [['all', 'All'], ['out', 'Purchases'], ['income', 'Deposits'], ['uncat', 'Needs review'],
+    ...(state.transactions.some((t) => t.pending) ? [['pending', 'Pending']] : []),
     ...state.accounts.map((a) => ['a:' + a.id, a.name]), ...expenseCats().map((c) => ['c:' + c.id, `${c.emoji} ${c.name}`])];
   return `
     <input class="search" type="search" placeholder="Search payee, note, category, amount" value="${esc(state.ui.txQuery)}" data-search>
     <div class="chips">${chips.map(([v, l]) => `<button class="chip ${f === v ? 'on' : ''}" data-filter="${esc(v)}">${esc(l)}</button>`).join('')}</div>
     <div class="spread small muted" style="margin:10px 4px 0"><span>${list.length} transactions</span><span class="num">Net ${signed(round2(total))}</span></div>
+    ${state.sync ? `<div class="small muted" style="margin:2px 4px 0">🔗 ${syncLabel()}</div>` : ''}
     ${shown.length ? Object.entries(groups).map(([d, ts]) => `<div class="date-head">${esc(dayLabel(d))}</div><ul class="list card" style="padding:2px 14px">${ts.map(txRow).join('')}</ul>`).join('')
       : '<div class="empty"><div class="e">🔍</div>No matching transactions.</div>'}
     ${list.length > shown.length ? `<p class="muted small" style="text-align:center">Showing latest ${shown.length}. Search to narrow down.</p>` : ''}`;
@@ -845,7 +970,7 @@ function viewAccounts() {
       return `<div class="section-title spread"><span>${esc(t.label)}</span><span class="num">${money(t.liability ? -sum : sum)}</span></div>
       <ul class="list card" style="padding:2px 14px">${groups[k].map((a) => {
         const b = accountBalance(a);
-        return `<li data-acct="${a.id}"><div class="emoji">${t.emoji}</div><div class="grow"><div class="title ellipsis">${esc(a.name)}</div><div class="sub">${esc(a.institution || t.label)}${a.hidden ? ' · hidden' : ''}</div></div><div class="num ${t.liability ? 'bad' : ''}">${money(t.liability ? -b : b)}</div></li>`;
+        return `<li data-acct="${a.id}"><div class="emoji">${t.emoji}</div><div class="grow"><div class="title ellipsis">${esc(a.name)}</div><div class="sub">${esc(a.institution || t.label)}${a.plaidId ? ' · 🔗 synced' : ''}${a.hidden ? ' · hidden' : ''}</div></div><div class="num ${t.liability ? 'bad' : ''}">${money(t.liability ? -b : b)}</div></li>`;
       }).join('')}</ul>`;
     }).join('')}
     <button class="btn" data-a="addacct" style="margin-top:8px">Add account</button>
