@@ -732,6 +732,7 @@ function openPasteBills() {
 }
 
 function handleBillsClick(e) {
+  if (e.target.closest('[data-futuretoggle]')) { state.ui.futureOpen = !state.ui.futureOpen; save(); render(); return true; }
   if (e.target.closest('select.recat')) return true; // let the picker work without opening the budget
   const cc = e.target.closest('[data-catcharges]');
   if (cc) { const k = cc.dataset.catcharges; (state.ui.catChargesOpen ||= {})[k] = !state.ui.catChargesOpen[k]; save(); render(); return true; }

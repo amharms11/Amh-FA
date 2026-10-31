@@ -296,3 +296,6 @@ svg.chart text { fill: var(--muted); font-size: 10px; }
 .cat-toggles { display: flex; flex-wrap: wrap; gap: 6px; }
 .charge-list li { gap: 8px; }
 .recat { max-width: 118px; font-size: 12px; padding: 5px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); flex: none; }
+
+.section-toggle { width: 100%; display: flex; justify-content: space-between; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin: 18px 0 10px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text); box-shadow: var(--shadow); }
+.section-toggle .muted { text-transform: none; letter-spacing: 0; font-weight: 500; }
