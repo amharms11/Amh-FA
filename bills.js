@@ -444,28 +444,45 @@ function billsContext() {
 // ---------- Home: checking balance ----------
 function checkingCard() {
   const accts = state.accounts.filter((a) => a.type === 'checking' && !a.hidden);
-  if (!accts.length) return '';
+  const cards = state.accounts.filter((a) => a.type === 'credit' && !a.hidden);
+  if (!accts.length && !cards.length) return '';
   const total = round2(accts.reduce((s, a) => s + accountBalance(a), 0));
-  const avail = accts.every((a) => a.available != null) ? round2(accts.reduce((s, a) => s + a.available, 0)) : null;
-  // What's left after bills due before the next payday (if the paycheck is set up).
-  let after = '';
-  const p = state.paycheck;
-  if (p?.amount) {
-    const next = paydays(p, addDays(today(), 1), addDays(today(), 40))[0];
+  const avail = accts.length && accts.every((a) => a.available != null) ? round2(accts.reduce((s, a) => s + a.available, 0)) : null;
+  const updated = state.sync ? esc(syncLabel().replace(/^.*data from /, 'Updated ')) : '';
+
+  let checkingHTML = '';
+  if (accts.length) {
+    // What's left after bills due before the next payday (if the paycheck is set up).
+    let after = '';
+    const p = state.paycheck;
+    const next = p?.amount ? paydays(p, addDays(today(), 1), addDays(today(), 40))[0] : null;
     if (next) {
       const due = billsDueBetween(today(), addDays(next, -1));
       const dueTotal = round2(due.reduce((s, b) => s + b.amount, 0));
       const leftAfter = round2((avail ?? total) - dueTotal);
       after = `<div class="small" style="margin-top:6px">${due.length ? `${money(dueTotal)} in bills due before payday (${esc(shortDate(next))}) → <b class="${leftAfter >= 0 ? 'good' : 'bad'}">${money(leftAfter)} left</b>` : `No bills due before payday (${esc(shortDate(next))})`}</div>`;
     }
+    checkingHTML = `<div class="spread"><div class="muted small">🏦 Checking</div><span class="small muted">${updated}</span></div>
+      <div class="big">${money(total)}</div>
+      ${avail != null && Math.abs(avail - total) >= 0.01 ? `<div class="small muted">Available now: <b style="color:var(--text)">${money(avail)}</b> (pending charges not yet posted)</div>` : ''}
+      ${accts.length > 1 ? `<div class="small muted">${accts.map((a) => `${esc(a.name)} ${money(accountBalance(a))}`).join(' · ')}</div>` : ''}
+      ${after}`;
   }
-  return `<div class="card" data-goto="accounts" style="cursor:pointer">
-    <div class="spread"><div class="muted small">🏦 Checking</div><span class="small muted">${state.sync ? esc(syncLabel().replace(/^.*data from /, 'Updated ')) : ''}</span></div>
-    <div class="big">${money(total)}</div>
-    ${avail != null && Math.abs(avail - total) >= 0.01 ? `<div class="small muted">Available now: <b style="color:var(--text)">${money(avail)}</b> (pending charges not yet posted)</div>` : ''}
-    ${accts.length > 1 ? `<div class="small muted">${accts.map((a) => `${esc(a.name)} ${money(accountBalance(a))}`).join(' · ')}</div>` : ''}
-    ${after}
-  </div>`;
+
+  let cardsHTML = '';
+  if (cards.length) {
+    const owed = round2(cards.reduce((s, a) => s - accountBalance(a), 0));
+    const limits = cards.every((a) => a.limit) ? cards.reduce((s, a) => s + a.limit, 0) : null;
+    const used = limits ? owed / limits : 0;
+    cardsHTML = `${accts.length ? '<div class="card-divider"></div>' : ''}
+      <div class="spread"><div class="muted small">💳 Credit card${cards.length > 1 ? 's' : ''}</div><span class="small muted">${limits ? `${Math.round(used * 100)}% of limit used` : accts.length ? '' : updated}</span></div>
+      <div class="mid ${owed > 0 ? 'bad' : ''}">${money(Math.max(0, owed))} <span class="small muted">owed${owed < 0 ? ` · ${money(-owed)} credit` : ''}</span></div>
+      ${limits ? `<div class="bar ${used > 0.5 ? 'over' : used > 0.3 ? 'near' : 'good'}"><i style="width:${Math.min(100, Math.max(0, used * 100))}%"></i></div>
+        <div class="small muted" style="margin-top:4px">${money(Math.max(0, limits - owed))} of ${money(limits, true)} credit available</div>` : ''}
+      ${cards.length > 1 ? `<div class="small muted">${cards.map((a) => `${esc(a.name)} ${money(-accountBalance(a))}`).join(' · ')}</div>` : ''}
+      ${accts.length ? `<div class="small" style="margin-top:6px">Checking after paying ${cards.length > 1 ? 'the cards' : 'the card'} in full: <b class="${total - owed >= 0 ? 'good' : 'bad'}">${money(total - owed)}</b></div>` : ''}`;
+  }
+  return `<div class="card" data-goto="accounts" style="cursor:pointer">${checkingHTML}${cardsHTML}</div>`;
 }
 
 // ---------- One-time data updates ----------

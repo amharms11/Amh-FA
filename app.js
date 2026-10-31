@@ -689,6 +689,7 @@ function applyPlaid({ accounts, txns, meta }) {
     const txSum = state.transactions.reduce((s, t) => (t.accountId === a.id ? s + t.amount : s), 0);
     a.opening = round2(desired - txSum);
     a.available = pa.available == null ? null : Number(pa.available);
+    a.limit = pa.limit == null ? null : Number(pa.limit);
   }
   state.sync = { source: meta.source || 'SoFi', at: meta.last_sync || meta.exported_at || new Date().toISOString(), imported: new Date().toISOString(), added, updated, removed };
   toast(`Synced: ${added} new, ${updated} updated${removed ? `, ${removed} removed` : ''}`);
@@ -778,6 +779,9 @@ function openSettings() {
         : 'Not set up. Close the small AMH Finance window, open AMH Finance from your Desktop and type <b>c</b>.'}</p>
       <button class="btn secondary" data-a="askopen">Open Ask Claude</button>
     </div>
+    <div class="card"><h2>Accounts</h2>
+      <button class="btn secondary" data-a="accountsview">View & edit accounts</button>
+    </div>
     <div class="card"><h2>Appearance</h2>
       <div class="segmented" data-theme-seg>${['auto', 'light', 'dark'].map((t) => `<button data-v="${t}" class="${state.ui.theme === t ? 'on' : ''}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div>
     </div>
@@ -822,6 +826,7 @@ function openSettings() {
       });
       if (a === 'newcat') { closeSheet(); newCategoryForm(); }
       if (a === 'askopen') { closeSheet(); openAsk(); }
+      if (a === 'accountsview') { closeSheet(); goto('accounts'); }
       if (a === 'notify') {
         if (state.ui.notify) { state.ui.notify = false; save(); closeSheet(); openSettings(); return; }
         if (!('Notification' in window)) { toast('This browser can’t show pop-ups'); return; }
@@ -918,8 +923,7 @@ function viewHome() {
 
   ${weeklyCard()}
 
-  ${state.accounts.length ? `<div class="card" data-goto="accounts" style="cursor:pointer"><h2>Net worth <span class="link">Details</span></h2>
-    <div class="mid">${money(nw.net)}</div>${line(snaps, 70)}</div>` : `<div class="card"><h2>Net worth</h2><p class="muted small">Add your accounts to see net worth.</p><button class="btn secondary small" data-a="addacct">Add account</button></div>`}
+  ${state.accounts.length ? '' : `<div class="card"><h2>Accounts</h2><p class="muted small">Add your accounts to see your balances here.</p><button class="btn secondary small" data-a="addacct">Add account</button></div>`}
 
   <div class="card"><h2>Upcoming <button class="link" data-goto="recurring">All recurring</button></h2>
     ${upcoming.length ? `<ul class="list">${upcoming.map(({ r, d }) => `<li data-rec="${r.id}" data-date="${d}"><div class="emoji">${esc(r.emoji)}</div><div class="grow"><div class="title">${esc(r.name)}</div><div class="sub">${esc(dayLabel(d))}</div></div><div class="num">${money(r.amount)}</div></li>`).join('')}</ul>`
@@ -1064,7 +1068,7 @@ function viewAccounts() {
 }
 
 // ---------- Render & events ----------
-const TITLES = { home: 'Home', tx: 'Activity', budgets: 'Budgets', recurring: 'Bills', reports: 'Reports', accounts: 'Net worth' };
+const TITLES = { home: 'Home', tx: 'Activity', budgets: 'Budgets', recurring: 'Bills', reports: 'Reports', accounts: 'Accounts' };
 function render() {
   const view = $('#view');
   const tab = state.ui.tab;

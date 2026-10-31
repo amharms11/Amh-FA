@@ -273,3 +273,5 @@ svg.chart text { fill: var(--muted); font-size: 10px; }
 
 .paste-box { width: 100%; border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 10px 12px; font: 13px/1.4 ui-monospace, Menlo, monospace; margin-bottom: 10px; }
 .list li input[type=checkbox] { width: 20px; height: 20px; flex: none; accent-color: var(--accent); }
+
+.card-divider { height: 1px; background: var(--line); margin: 14px 0 12px; }

@@ -1,5 +1,5 @@
 // Offline cache. Bump VERSION whenever app files change.
-const VERSION = 'amhfa-v11';
+const VERSION = 'amhfa-v13';
 const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'features.js', 'bills.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
