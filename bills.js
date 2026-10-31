@@ -270,6 +270,9 @@ function viewBills() {
 
     ${billSuggestionsHTML()}
 
+    <div class="section-title">Your bills</div>
+    ${viewRecurring()}
+
     <div class="section-title spread"><span>Paycheck plan</span>${p ? '<button class="link" data-a="paycheck">Edit paycheck</button>' : ''}</div>
     ${!p ? `<div class="card">
         <div class="title">💵 Plan each paycheck</div>
@@ -278,10 +281,7 @@ function viewBills() {
           <button class="btn" data-a="usepay">Use this paycheck</button><div class="btn-row"><button class="btn secondary" data-a="paycheck">Change details</button></div>`
           : '<button class="btn" data-a="paycheck">Set up my paycheck</button>'}
       </div>` : plan ? `${plan.checks.map(paycheckCard).join('')}
-      <p class="small muted">How this works: each bill is paid from the last paycheck that arrives at least ${+p.buffer || 0} day${+p.buffer === 1 ? '' : 's'} before it’s due. If a paycheck would come up short, some bills are moved to the paycheck before it (“Pay early”), or extra from an earlier paycheck is kept to cover it. Yearly and quarterly bills are saved for a little at a time. Everyday spending comes from your Budgets tab.</p>` : ''}
-
-    <div class="section-title">Your bills</div>
-    ${viewRecurring()}`;
+      <p class="small muted">How this works: each bill is paid from the last paycheck that arrives at least ${+p.buffer || 0} day${+p.buffer === 1 ? '' : 's'} before it’s due. If a paycheck would come up short, some bills are moved to the paycheck before it (“Pay early”), or extra from an earlier paycheck is kept to cover it. Yearly and quarterly bills are saved for a little at a time. Everyday spending comes from your Budgets tab.</p>` : ''}`;
 }
 
 function billSuggestionsHTML() {
