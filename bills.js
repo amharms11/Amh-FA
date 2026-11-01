@@ -267,7 +267,7 @@ function viewBills() {
       ${monthlyPay ? `<div style="text-align:right"><div class="muted small">Take-home pay</div><div class="mid good">${money(monthlyPay, true)}</div><div class="small muted">per month</div></div>` : ''}</div>
       ${pctOfPay !== null ? `<div class="bar ${pctOfPay > 60 ? 'over' : pctOfPay > 45 ? 'near' : 'good'}" style="margin-top:10px"><i style="width:${Math.min(100, pctOfPay)}%"></i></div>
         <div class="small muted" style="margin-top:4px">Bills use <b style="color:var(--text)">${pctOfPay}%</b> of your take-home pay. Everyday budgets ${money(everydayMonthly(), true)}/mo · Savings ${money(plan?.savingsMonthly || 0, true)}/mo${plan && !(+p.save > 0) && plan.goalsMonthly > plan.savingsMonthly + 1 ? ` <span class="bad">(your goals need ${money(plan.goalsMonthly, true)}/mo)</span>` : ''} · Left ${money(monthlyPay - mb - everydayMonthly() - (plan?.savingsMonthly || 0), true)}/mo</div>` : ''}
-      <div class="btn-row"><button class="btn small" data-a="newrec">+ Add a bill</button><button class="btn small secondary" data-a="pastebills">📋 Paste a bill list</button></div>
+      <div class="btn-row"><button class="btn small" data-a="newrec">+ Add a bill</button><button class="btn small secondary" data-a="pastebills">📋 Paste a bill list</button>${state.recurrings.length ? '<button class="btn small secondary" data-a="billcal">📅 Add to calendar</button>' : ''}</div>
     </div>
 
     ${billSuggestionsHTML()}
@@ -681,6 +681,74 @@ function paidBillsDropdown(items) {
       <div class="spread small" style="margin-top:6px"><span class="muted">Total paid</span><b class="num">${money(total)}</b></div>` : ''}`;
 }
 
+// ---------- Export bill due dates to a calendar (.ics) ----------
+function icsEscape(s) { return String(s).replace(/\\/g, '\\\\').replace(/;/g, '\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n'); }
+function icsFold(line) {
+  // Fold long lines at 70 characters (calendar files require short lines).
+  const out = []; let rest = line;
+  while ([...rest].length > 70) { const chars = [...rest]; out.push(chars.slice(0, 70).join('')); rest = ' ' + chars.slice(70).join(''); }
+  out.push(rest); return out.join('\r\n');
+}
+function billRRule(r, start) {
+  // Monthly rules follow the bill's own due day (a 31st bill stays "last day of the month" even if the next one is the 30th).
+  const d = +(r.start || start).slice(8), wd = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'][parseD(start).getDay()];
+  if (r.freq === 'weekly') return `FREQ=WEEKLY;BYDAY=${wd}`;
+  if (r.freq === 'biweekly') return `FREQ=WEEKLY;INTERVAL=2;BYDAY=${wd}`;
+  if (r.freq === 'yearly') return 'FREQ=YEARLY';
+  const every = r.freq === 'quarterly' ? ';INTERVAL=3' : '';
+  // Days 29-31: use that day, or the last day of shorter months.
+  if (d === 31) return `FREQ=MONTHLY${every};BYMONTHDAY=-1`;
+  if (d >= 29) return `FREQ=MONTHLY${every};BYMONTHDAY=${d},-1;BYSETPOS=1`;
+  return `FREQ=MONTHLY${every};BYMONTHDAY=${d}`;
+}
+function buildBillsICS(bills, { amounts, remindDays }) {
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//AMH Finance//Bills//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'X-WR-CALNAME:Bills'];
+  for (const r of bills) {
+    const start = nextDue(r) || r.start;
+    const day = start.replace(/-/g, ''), next = addDays(start, 1).replace(/-/g, '');
+    const title = `💵 ${r.name} due${amounts ? ` — ${r.variable ? 'about ' : ''}${money(r.amount)}` : ''}`;
+    const desc = ['Bill reminder from AMH Finance.', r.autopay ? 'Paid automatically (autopay).' : '', acct(r.accountId) ? `Paid from ${acct(r.accountId).name}.` : ''].filter(Boolean).join(' ');
+    L.push('BEGIN:VEVENT', `UID:amhfa-bill-${r.id}@amh-finance`, `DTSTAMP:${stamp}`, `DTSTART;VALUE=DATE:${day}`, `DTEND;VALUE=DATE:${next}`,
+      `RRULE:${billRRule(r, start)}`, `SUMMARY:${icsEscape(title)}`, `DESCRIPTION:${icsEscape(desc)}`, 'TRANSP:TRANSPARENT', 'CATEGORIES:Bills');
+    if (remindDays > 0) L.push('BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsEscape(title)}`, `TRIGGER:-P${remindDays - 1 ? `${remindDays - 1}D` : ''}T15H`, 'END:VALARM'); // 9 am, N days before
+    L.push('END:VEVENT');
+  }
+  L.push('END:VCALENDAR');
+  return L.map(icsFold).join('\r\n') + '\r\n';
+}
+function openCalendarExport() {
+  const bills = [...state.recurrings].sort((a, b) => String(nextDue(a)).localeCompare(String(nextDue(b))));
+  openSheet('📅 Add bills to your calendar', `
+    <p class="small muted" style="margin-top:0">Creates a calendar file with each bill as a repeating all-day event. Open it on your Mac and pick your <b>Family</b> calendar.</p>
+    <label class="field check"><input type="checkbox" data-cal-amounts checked><span>Show amounts in the event names</span></label>
+    <p class="small muted" style="margin:-6px 0 10px 30px">Everyone who shares the calendar will see them. Untick to show just “Rent due”.</p>
+    <label class="field"><span>Reminder</span><select data-cal-remind>
+      <option value="0">No reminder</option><option value="1">1 day before (9 am)</option><option value="2" selected>2 days before (9 am)</option><option value="3">3 days before (9 am)</option></select></label>
+    <div class="spread small" style="margin:4px 0 6px"><b>Bills to include</b><button class="link" data-cal-all>Select all / none</button></div>
+    <ul class="list card" style="padding:2px 14px;max-height:40vh;overflow:auto">${bills.map((r) => `<li style="cursor:default"><input type="checkbox" data-cal-bill="${r.id}" checked aria-label="${esc(r.name)}">
+      <div class="grow"><div class="title ellipsis">${esc(r.emoji)} ${esc(r.name)}</div><div class="sub">${money(r.amount)} · ${esc(FREQ_LABEL[r.freq] || r.freq)} · next ${esc(shortDate(nextDue(r) || r.start))}</div></div></li>`).join('')}</ul>
+    <button class="btn" data-cal-go>Download calendar file</button>`, (sheet) => {
+    $('[data-cal-all]', sheet).addEventListener('click', () => {
+      const boxes = $$('[data-cal-bill]', sheet), on = boxes.some((b) => !b.checked);
+      boxes.forEach((b) => { b.checked = on; });
+    });
+    $('[data-cal-go]', sheet).addEventListener('click', () => {
+      const picked = bills.filter((r) => $(`[data-cal-bill="${r.id}"]`, sheet).checked);
+      if (!picked.length) { toast('Pick at least one bill'); return; }
+      const ics = buildBillsICS(picked, { amounts: $('[data-cal-amounts]', sheet).checked, remindDays: +$('[data-cal-remind]', sheet).value });
+      download('AMH-Finance-bills.ics', ics, 'text/calendar');
+      closeSheet();
+      openSheet('Almost done', `<ol class="small" style="padding-left:18px;line-height:1.6;margin-top:0">
+        <li>Open your <b>Downloads</b> folder (or click the download in your browser).</li>
+        <li>Double-click <b>AMH-Finance-bills.ics</b>. The Calendar app opens.</li>
+        <li>When it asks which calendar, choose <b>Family</b> and click <b>OK</b>.</li></ol>
+        <p class="small muted">${picked.length} bill${picked.length === 1 ? '' : 's'} added as repeating events. If you change a bill later, delete its old events in Calendar and export again.</p>
+        <button class="btn" data-close>Done</button>`);
+    });
+  });
+}
+
 // ---------- One-time data updates ----------
 function runMigrations() {
   const m = (state.migrations ||= {});
@@ -834,6 +902,7 @@ function handleBillsClick(e) {
   if (ig) { (state.ignoredBills ||= {})[ig.dataset.ignoresugg] = 1; save(); render(); toast('Hidden — it won’t be suggested again'); return true; }
   const n = e.target.closest('[data-a]');
   if (n?.dataset.a === 'pastebills') { openPasteBills(); return true; }
+  if (n?.dataset.a === 'billcal') { openCalendarExport(); return true; }
   if (n?.dataset.a === 'coverbills') { coverBillsInBudgets(); return true; }
   if (n?.dataset.a === 'addallbills') {
     const list = detectRecurring();
