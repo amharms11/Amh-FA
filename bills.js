@@ -628,16 +628,22 @@ function everydayCharges(from, to) {
   }
   return out.sort((a, b) => b.t.date.localeCompare(a.t.date));
 }
-function spendingMeterHTML() {
+function meterData() {
   const p = state.paycheck;
-  if (!p?.amount) return '';
+  if (!p?.amount) return null;
   let limit, cushion;
-  if ((p.method || 'even') === 'even') { const e = buildEvenPlan(); if (!e) return ''; limit = e.spending; cushion = Math.max(0, e.left); }
-  else { const plan = buildPaycheckPlan(); const c = plan?.checks[0]; if (!c) return ''; limit = c.spending; cushion = Math.max(0, c.left); }
-  if (!(limit > 0)) return '';
+  if ((p.method || 'even') === 'even') { const e = buildEvenPlan(); if (!e) return null; limit = e.spending; cushion = Math.max(0, e.left); }
+  else { const plan = buildPaycheckPlan(); const c = plan?.checks[0]; if (!c) return null; limit = c.spending; cushion = Math.max(0, c.left); }
+  if (!(limit > 0)) return null;
   const { start, next } = currentPayPeriod(p);
   const charges = everydayCharges(start, addDays(next, -1));
   const spent = round2(charges.reduce((s, x) => s + x.amount, 0));
+  return { limit, cushion, start, next, charges, spent, cap: limit + cushion, daysLeft: Math.max(0, daysFrom(today(), next)) };
+}
+function spendingMeterHTML() {
+  const m = meterData();
+  if (!m) return '';
+  const { limit, cushion, start, next, charges, spent } = m;
   const cap = limit + cushion;
   const scale = Math.max(cap, spent) || 1;
   const zone = spent <= limit ? 'ok' : spent <= cap ? 'cushion' : 'over';
@@ -747,6 +753,96 @@ function openCalendarExport() {
         <button class="btn" data-close>Done</button>`);
     });
   });
+}
+
+// ---------- Today: the morning brief ----------
+function billsOn(date) {
+  const out = [];
+  for (const r of state.recurrings) for (const d of occurrencesInMonth(r, monthOf(date))) if (d === date) out.push({ r, d, paid: findPayment(r, d) });
+  return out;
+}
+function todayFacts() {
+  const t0 = today(), y = addDays(t0, -1);
+  const billIds = billPaymentIds(addDays(t0, -40), addDays(t0, 10));
+  const ytx = state.transactions.filter((t) => t.date === y);
+  const spentY = ytx.filter((t) => t.amount < 0 && !isOwnMove(t.payee) && cat(t.categoryId).kind !== 'transfer');
+  const billsY = spentY.filter((t) => billIds.has(t.id)), freeY = spentY.filter((t) => !billIds.has(t.id));
+  const incomeY = ytx.filter((t) => t.amount > 0 && cat(t.categoryId).kind === 'income');
+  const sum = (arr) => round2(arr.reduce((s, t) => s - t.amount, 0));
+  const typical = round2(everydayCharges(addDays(t0, -30), addDays(t0, -1)).reduce((s, x) => s + x.amount, 0) / 30);
+  const dueToday = billsOn(t0);
+  const soon = [1, 2, 3].flatMap((n) => billsOn(addDays(t0, n)).filter((b) => !b.paid));
+  const m = meterData();
+  const checking = state.accounts.filter((a) => a.type === 'checking' && !a.hidden);
+  const chkTotal = round2(checking.reduce((s, a) => s + accountBalance(a), 0));
+  const chkAvail = checking.length && checking.every((a) => a.available != null) ? round2(checking.reduce((s, a) => s + a.available, 0)) : null;
+  return { t0, y, spentY, billsY, freeY, incomeY, sum, typical, dueToday, soon, m, checking, chkTotal, chkAvail, alerts: computeAlerts().slice(0, 3) };
+}
+let briefBusy = false;
+async function writeBrief(force) {
+  const t0 = today();
+  if (briefBusy || !localApi?.claude || (!force && state.briefs?.[t0])) return;
+  briefBusy = true; if (state.ui.tab === 'today') render();
+  const f = todayFacts();
+  const facts = [
+    `Yesterday (${f.y}): everyday spending ${money(f.sum(f.freeY))} on ${f.freeY.length} purchases (typical day ${money(f.typical)}); bills paid ${money(f.sum(f.billsY))}; money in ${money(f.incomeY.reduce((s, t) => s + t.amount, 0))}.`,
+    `Bills due today: ${f.dueToday.map((b) => `${b.r.name} ${money(b.r.amount)}${b.paid ? ' (already paid)' : ''}`).join(', ') || 'none'}. Next 3 days: ${f.soon.map((b) => `${b.r.name} ${money(b.r.amount)} on ${b.d}`).join(', ') || 'none'}.`,
+    f.m ? `This paycheck: ${money(f.m.spent)} of ${money(f.m.limit)} everyday budget used (+${money(f.m.cushion)} cushion), ${f.m.daysLeft} days until payday on ${f.m.next}.` : '',
+    f.checking.length ? `Checking balance ${money(f.chkTotal)}${f.chkAvail != null ? `, available ${money(f.chkAvail)}` : ''}.` : '',
+    f.alerts.length ? `Alerts: ${f.alerts.map((a) => a.text).join(' | ')}` : '',
+  ].filter(Boolean).join('\n');
+  const q = `Write my morning money brief for today (${t0}) in 3-5 short bullet points: how yesterday went, what's due today and soon, how much I can comfortably spend per day until payday, and anything I should watch. Friendly, plain, no headings. Today's facts:\n${facts}`;
+  try {
+    const res = await fetch('api/ask', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-AMH': '1' }, body: JSON.stringify({ question: q, context: buildClaudeContext(), history: [] }) });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+    state.briefs = Object.fromEntries(Object.entries({ ...(state.briefs || {}), [t0]: data.answer }).sort().slice(-7));
+    save();
+  } catch (e) { toast('Couldn’t write the brief: ' + e.message); }
+  finally { briefBusy = false; if (state.ui.tab === 'today') render(); }
+}
+function viewToday() {
+  const f = todayFacts();
+  const hour = new Date().getHours();
+  const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  const brief = state.briefs?.[f.t0];
+  if (!brief && localApi?.claude && !briefBusy && !syncing) setTimeout(() => writeBrief(false), 0);
+  const txLine = (t, extra = '') => `<li data-tx="${t.id}"><div class="grow" style="min-width:0"><div class="ellipsis">${esc(t.payee)}</div><div class="muted small">${esc(t.splits?.length ? '✂️ split' : cat(t.categoryId).name)}${extra}</div></div><span class="num ${t.amount > 0 ? 'good' : ''}">${t.amount > 0 ? '+' : ''}${money(Math.abs(t.amount))}</span></li>`;
+  const billLine = (b, when) => `<li data-rec="${b.r.id}" data-date="${b.d}"><span class="bill-emoji">${esc(b.r.emoji)}</span><span class="grow">${esc(b.r.name)}<span class="muted"> · ${when}</span> ${b.paid ? '<span class="pill good">Paid</span>' : b.r.autopay ? '<span class="pill">Autopay</span>' : ''}</span><span class="num">${money(b.r.amount)}</span></li>`;
+  const freeTotal = f.sum(f.freeY), dueTotal = f.dueToday.filter((b) => !b.paid).reduce((s, b) => s + b.r.amount, 0);
+  const perDay = f.m && f.m.daysLeft ? Math.max(0, (f.m.limit - f.m.spent) / f.m.daysLeft) : null;
+  return `${syncBar()}
+    <div class="today-head"><div class="mid">${greet}!</div><div class="muted small">${esc(parseD(f.t0).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }))}</div></div>
+
+    ${localApi?.claude || brief ? `<div class="card brief">
+      <div class="spread"><span class="muted small">✨ Your brief</span>${localApi?.claude ? `<button class="link" data-a="rebrief" ${briefBusy ? 'disabled' : ''}>${briefBusy ? 'Writing…' : 'Refresh'}</button>` : ''}</div>
+      ${brief ? `<div class="brief-text">${mdLite(brief)}</div>` : `<p class="small muted thinking-text">${briefBusy ? 'Writing your brief…' : 'Your brief will appear here.'}</p>`}
+    </div>` : ''}
+
+    <div class="card"><h2>Due today</h2>
+      ${f.dueToday.length ? `<ul class="cat-bills" style="border:0;padding:0;margin:0">${f.dueToday.map((b) => billLine(b, 'today')).join('')}</ul>
+        ${dueTotal ? `<div class="small" style="margin-top:6px">${money(dueTotal)} still to go out today${f.chkAvail != null || f.checking.length ? ` · checking after: <b class="${(f.chkAvail ?? f.chkTotal) - dueTotal >= 0 ? 'good' : 'bad'}">${money((f.chkAvail ?? f.chkTotal) - dueTotal)}</b>` : ''}</div>` : '<div class="small good" style="margin-top:6px">✓ Everything due today is paid.</div>'}`
+        : '<p class="small muted" style="margin:0">No bills due today. 🎉</p>'}
+      ${f.soon.length ? `<div class="small muted" style="margin:12px 0 2px">Next 3 days</div><ul class="cat-bills" style="border:0;padding:0;margin:0">${f.soon.map((b) => billLine(b, esc(dayLabel(b.d)))).join('')}</ul>` : ''}
+    </div>
+
+    <div class="card"><h2>Yesterday</h2>
+      <div class="spread"><div><div class="mid">${money(freeTotal)}</div><div class="small muted">everyday spending${f.typical ? ` · typical day ${money(f.typical)}` : ''}</div></div>
+        ${f.typical ? `<span class="pill ${freeTotal <= f.typical ? 'good' : 'warn'}">${freeTotal <= f.typical ? 'Below typical' : 'Above typical'}</span>` : ''}</div>
+      ${f.freeY.length ? `<ul class="cat-bills charge-list" style="border:0;padding:0">${f.freeY.slice(0, 8).map((t) => txLine(t)).join('')}</ul>${f.freeY.length > 8 ? `<p class="small muted">+ ${f.freeY.length - 8} more in Activity</p>` : ''}` : '<p class="small muted">No everyday purchases yesterday.</p>'}
+      ${f.billsY.length ? `<div class="small muted" style="margin:10px 0 2px">Bills paid · ${money(f.sum(f.billsY))}</div><ul class="cat-bills charge-list" style="border:0;padding:0">${f.billsY.map((t) => txLine(t)).join('')}</ul>` : ''}
+      ${f.incomeY.length ? `<div class="small muted" style="margin:10px 0 2px">Money in</div><ul class="cat-bills charge-list" style="border:0;padding:0">${f.incomeY.map((t) => txLine(t)).join('')}</ul>` : ''}
+    </div>
+
+    ${f.m ? `<div class="card"><h2>This paycheck</h2>
+      <div class="spread"><div><div class="mid ${f.m.spent > f.m.cap ? 'bad' : ''}">${money(Math.max(0, f.m.limit - f.m.spent))}</div><div class="small muted">left for everyday spending</div></div>
+        ${perDay != null ? `<div style="text-align:right"><div class="mid">${money(perDay)}</div><div class="small muted">per day for ${f.m.daysLeft} day${f.m.daysLeft === 1 ? '' : 's'}</div></div>` : ''}</div>
+      <div class="small muted" style="margin-top:6px">${money(f.m.spent)} of ${money(f.m.limit)} used${f.m.cushion ? ` · ${money(f.m.cushion)} cushion` : ''} · payday ${esc(shortDate(f.m.next))}</div>
+    </div>` : ''}
+
+    ${f.checking.length ? `<div class="card"><h2>Checking</h2><div class="mid">${money(f.chkTotal)}</div>${f.chkAvail != null && Math.abs(f.chkAvail - f.chkTotal) >= 0.01 ? `<div class="small muted">Available ${money(f.chkAvail)}</div>` : ''}</div>` : ''}
+
+    ${f.alerts.length ? `<div class="card"><h2>Watch</h2><ul class="list">${f.alerts.map((a) => `<li ${a.attrs}><div class="emoji">${esc(a.icon)}</div><div class="grow small ${a.tone === 'bad' ? 'bad' : ''}">${esc(a.text)}</div></li>`).join('')}</ul></div>` : ''}`;
 }
 
 // ---------- One-time data updates ----------
@@ -902,6 +998,7 @@ function handleBillsClick(e) {
   if (ig) { (state.ignoredBills ||= {})[ig.dataset.ignoresugg] = 1; save(); render(); toast('Hidden — it won’t be suggested again'); return true; }
   const n = e.target.closest('[data-a]');
   if (n?.dataset.a === 'pastebills') { openPasteBills(); return true; }
+  if (n?.dataset.a === 'rebrief') { writeBrief(true); return true; }
   if (n?.dataset.a === 'billcal') { openCalendarExport(); return true; }
   if (n?.dataset.a === 'coverbills') { coverBillsInBudgets(); return true; }
   if (n?.dataset.a === 'addallbills') {

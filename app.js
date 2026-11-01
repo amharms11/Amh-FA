@@ -1094,7 +1094,7 @@ function viewAccounts() {
 }
 
 // ---------- Render & events ----------
-const TITLES = { home: 'Home', tx: 'Activity', budgets: 'Budgets', recurring: 'Bills', reports: 'Reports', accounts: 'Accounts' };
+const TITLES = { home: 'Home', today: 'Today', tx: 'Activity', budgets: 'Budgets', recurring: 'Bills', reports: 'Reports', accounts: 'Accounts' };
 function render() {
   const view = $('#view');
   const tab = state.ui.tab;
@@ -1105,7 +1105,7 @@ function render() {
   $('#askTopBtn').style.display = state.setup ? '' : 'none';
   $('#pageTitle').textContent = state.setup ? TITLES[tab] : 'AMH Finance';
   if (!state.setup) { view.innerHTML = viewWelcome(); return; }
-  view.innerHTML = ({ home: viewHome, tx: viewTx, budgets: viewBudgets, recurring: viewBills, reports: viewReports, accounts: viewAccounts }[tab] || viewHome)();
+  view.innerHTML = ({ home: viewHome, today: viewToday, tx: viewTx, budgets: viewBudgets, recurring: viewBills, reports: viewReports, accounts: viewAccounts }[tab] || viewHome)();
 }
 function goto(tab) { state.ui.tab = tab; render(); window.scrollTo({ top: 0 }); }
 
