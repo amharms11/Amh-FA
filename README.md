@@ -69,6 +69,24 @@ To use it again later: `cd Amh-FA/connector`, `source .venv/bin/activate`, then 
 
 The local server only accepts connections from your own computer. `.gitignore` keeps export files and tokens out of this repo.
 
+## Paper trading with Claude (simulated money)
+`trader/paper_trader.py` lets Claude suggest stock trades for an **Alpaca paper account**, which uses fake money. Claude never places orders itself. You approve every order, and the script blocks any order that breaks your limits.
+
+```bash
+cd Amh-FA/trader
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python paper_trader.py setup     # paste your Alpaca *paper* keys (they start with PK)
+python paper_trader.py status    # account value, cash, positions
+python paper_trader.py run       # Claude proposes trades; type y to place each one
+python paper_trader.py history   # every plan, approval, skip and blocked trade
+```
+Claude uses the same sign-in as Ask Claude (Claude Code, or `ANTHROPIC_API_KEY` in `~/.sofi-tracker/config.env` or `~/.amh-trader/config.env`).
+
+**Limits** are in `~/.amh-trader/settings.json`: watchlist, your strategy in plain English, the largest single order (default $500), the largest share of the account one stock may take (20%), orders per day (5), and a daily loss stop (3%) after which no new buys are allowed. Orders are limit orders within 0.5% of the last price, whole shares only, with no short selling and no borrowing.
+
+**Safety:** only paper keys are accepted and the address is fixed to Alpaca's paper endpoint, so this tool cannot trade real money. Claude sees only prices and your paper account numbers, not news or web pages. Run it on paper for a few months and compare the result with simply holding SPY before you consider anything else. This is not financial advice.
+
 ## Getting your transactions in manually
 Most banks and card issuers can export transactions as CSV from their website. Use **Settings → Import bank CSV**, choose the account, and confirm which columns hold the date, description and amount.
 
