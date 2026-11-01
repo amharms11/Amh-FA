@@ -303,7 +303,10 @@ function buildEvenPlan() {
   if (!p?.amount) return null;
   const py = perYear(p), t0 = today(), horizon = addDays(t0, 182);
   const contribution = round2(Math.ceil(((monthlyBills() * 12) / py) * 100) / 100);
-  const spending = round2((everydayMonthly() * 12) / py);
+  // Everyday spending comes from your budgets, but never more than the paycheck has left after bills.
+  const budgetSpending = round2((everydayMonthly() * 12) / py);
+  const spending = round2(Math.max(0, Math.min(budgetSpending, p.amount - contribution)));
+  const reducedFrom = spending < budgetSpending - 0.005 ? budgetSpending : null;
   const room = p.amount - contribution - spending;
   const target = +p.save > 0 ? +p.save : Math.min((goalsMonthly() * 12) / py, Math.max(0, room));
   const savings = round2(Math.max(0, Math.min(target, room)));
@@ -324,7 +327,7 @@ function buildEvenPlan() {
     return { date: d, due, dueTotal: round2(due.reduce((s, b) => s + b.amount, 0)) };
   });
   const beforeFirst = bills.filter((b) => b.date < (pays[0] || horizon));
-  return { p, py, contribution, spending, savings, left, cushion, minDate, points, checks, beforeFirst };
+  return { p, py, contribution, spending, savings, left, cushion, minDate, points, checks, beforeFirst, reducedFrom };
 }
 function billLines(list) {
   return `<ul class="list bill-list" style="margin-left:0">${list.map((b) => `<li data-rec="${b.r.id}" data-date="${b.date}"><span class="bill-emoji">${esc(b.r.emoji)}</span><span class="grow ellipsis">${esc(b.r.name)} <span class="muted">· ${esc(shortDate(b.date))}</span></span><span class="num">${money(b.amount)}</span></li>`).join('')}</ul>`;
@@ -343,6 +346,7 @@ function evenPlanHTML() {
       ${allocBar(c)}
       ${row(ALLOC_COLORS.bills, '<b>To your Bills vault</b>', e.contribution)}
       ${row(ALLOC_COLORS.spending, 'Everyday spending (groceries, gas, fun…)', e.spending)}
+      ${e.reducedFrom ? `<p class="small muted" style="margin:2px 0 4px 16px">Your budgets allow ${money(e.reducedFrom)}, but after bills this paycheck has ${money(e.spending)} left for everyday spending. Lower some category budgets on the Budgets tab to match.</p>` : ''}
       ${e.savings ? row(ALLOC_COLORS.savings, 'Savings & goals', e.savings) : ''}
       <div class="spread small alloc-row"><b>${e.left >= 0 ? 'Left over' : 'Short by'}</b><b class="num ${e.left >= 0 ? 'good' : 'bad'}">${money(Math.abs(e.left))}</b></div>
       ${e.left < 0 ? '<p class="small bad" style="margin:4px 0 0">Your paycheck doesn’t cover bills plus everyday budgets. Lower some everyday budgets on the Budgets tab, or look for bills to cut.</p>' : ''}
@@ -632,18 +636,19 @@ function meterData() {
   const p = state.paycheck;
   if (!p?.amount) return null;
   let limit, cushion;
-  if ((p.method || 'even') === 'even') { const e = buildEvenPlan(); if (!e) return null; limit = e.spending; cushion = Math.max(0, e.left); }
+  let reducedFrom = null;
+  if ((p.method || 'even') === 'even') { const e = buildEvenPlan(); if (!e) return null; limit = e.spending; cushion = Math.max(0, e.left); reducedFrom = e.reducedFrom; }
   else { const plan = buildPaycheckPlan(); const c = plan?.checks[0]; if (!c) return null; limit = c.spending; cushion = Math.max(0, c.left); }
   if (!(limit > 0)) return null;
   const { start, next } = currentPayPeriod(p);
   const charges = everydayCharges(start, addDays(next, -1));
   const spent = round2(charges.reduce((s, x) => s + x.amount, 0));
-  return { limit, cushion, start, next, charges, spent, cap: limit + cushion, daysLeft: Math.max(0, daysFrom(today(), next)) };
+  return { limit, cushion, start, next, charges, spent, cap: limit + cushion, daysLeft: Math.max(0, daysFrom(today(), next)), reducedFrom };
 }
 function spendingMeterHTML() {
   const m = meterData();
   if (!m) return '';
-  const { limit, cushion, start, next, charges, spent } = m;
+  const { limit, cushion, start, next, charges, spent, reducedFrom } = m;
   const cap = limit + cushion;
   const scale = Math.max(cap, spent) || 1;
   const zone = spent <= limit ? 'ok' : spent <= cap ? 'cushion' : 'over';
@@ -662,6 +667,7 @@ function spendingMeterHTML() {
         <i class="meter-fill" style="width:${Math.min(100, (spent / scale) * 100)}%;background:${fillColor}"></i>
         <i class="meter-mark" style="left:${(limit / scale) * 100}%"></i>
       </div>
+      ${reducedFrom ? `<div class="small muted" style="margin-top:6px">Lowered from ${money(reducedFrom)} so your bills stay covered.</div>` : ''}
       <div class="spread small" style="margin-top:6px"><span>${status}</span><span class="muted" style="white-space:nowrap">resets ${esc(shortDate(next))}${daysLeft ? ` · ${daysLeft} day${daysLeft === 1 ? '' : 's'}` : ''}</span></div>
     </button>
     ${open ? (charges.length ? `<ul class="cat-bills charge-list">${charges.slice(0, 100).map(({ t, amount }) => `<li data-tx="${t.id}"><div class="grow" style="min-width:0"><div class="ellipsis">${esc(t.payee)}${t.pending ? ' <span class="pill warn">Pending</span>' : ''}</div><div class="muted small">${esc(shortDate(t.date))} · ${esc(t.splits?.length ? '✂️ split' : cat(t.categoryId).name)}</div></div><span class="num">${money(amount)}</span></li>`).join('')}</ul>
