@@ -807,48 +807,72 @@ async function writeBrief(force) {
   } catch (e) { toast('Couldn’t write the brief: ' + e.message); }
   finally { briefBusy = false; if (state.ui.tab === 'today') render(); }
 }
+function todaySection(key, title, summary, body, defaultOpen = false) {
+  const st = state.ui.todayOpen || {};
+  const open = key in st ? st[key] : defaultOpen;
+  return `<div class="card today-sec">
+    <button class="today-sec-head" data-todaysec="${key}" aria-expanded="${open}">
+      <span class="grow" style="text-align:left;min-width:0"><span class="today-sec-title">${title}</span>
+        <span class="today-sec-sum">${summary}</span></span>
+      <span class="chev ${open ? 'open' : ''}" aria-hidden="true">›</span>
+    </button>
+    ${open ? `<div class="today-sec-body">${body}</div>` : ''}
+  </div>`;
+}
 function viewToday() {
   const f = todayFacts();
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   const brief = state.briefs?.[f.t0];
   if (!brief && localApi?.claude && !briefBusy && !syncing) setTimeout(() => writeBrief(false), 0);
-  const txLine = (t, extra = '') => `<li data-tx="${t.id}"><div class="grow" style="min-width:0"><div class="ellipsis">${esc(t.payee)}</div><div class="muted small">${esc(t.splits?.length ? '✂️ split' : cat(t.categoryId).name)}${extra}</div></div><span class="num ${t.amount > 0 ? 'good' : ''}">${t.amount > 0 ? '+' : ''}${money(Math.abs(t.amount))}</span></li>`;
+  const txLine = (t) => `<li data-tx="${t.id}"><div class="grow" style="min-width:0"><div class="ellipsis">${esc(t.payee)}</div><div class="muted small">${esc(t.splits?.length ? '✂️ split' : cat(t.categoryId).name)}</div></div><span class="num ${t.amount > 0 ? 'good' : ''}">${t.amount > 0 ? '+' : ''}${money(Math.abs(t.amount))}</span></li>`;
   const billLine = (b, when) => `<li data-rec="${b.r.id}" data-date="${b.d}"><span class="bill-emoji">${esc(b.r.emoji)}</span><span class="grow">${esc(b.r.name)}<span class="muted"> · ${when}</span> ${b.paid ? '<span class="pill good">Paid</span>' : b.r.autopay ? '<span class="pill">Autopay</span>' : ''}</span><span class="num">${money(b.r.amount)}</span></li>`;
-  const freeTotal = f.sum(f.freeY), dueTotal = f.dueToday.filter((b) => !b.paid).reduce((s, b) => s + b.r.amount, 0);
+  const ul = (items) => `<ul class="cat-bills charge-list" style="border:0;padding:0;margin:0">${items}</ul>`;
+  const freeTotal = f.sum(f.freeY);
+  const unpaidToday = f.dueToday.filter((b) => !b.paid), dueTotal = unpaidToday.reduce((s, b) => s + b.r.amount, 0);
   const perDay = f.m && f.m.daysLeft ? Math.max(0, (f.m.limit - f.m.spent) / f.m.daysLeft) : null;
+  const sections = [];
+
+  if (localApi?.claude || brief) {
+    sections.push(todaySection('brief', '✨ Your brief',
+      brief ? 'Your summary for today' : briefBusy ? '<span class="thinking-text">Writing…</span>' : 'Not written yet',
+      `${brief ? `<div class="brief-text">${mdLite(brief)}</div>` : `<p class="small muted thinking-text" style="margin:0">${briefBusy ? 'Writing your brief…' : 'Your brief will appear here.'}</p>`}
+       ${localApi?.claude ? `<div style="text-align:right;margin-top:4px"><button class="link" data-a="rebrief" ${briefBusy ? 'disabled' : ''}>${briefBusy ? 'Writing…' : '↻ Rewrite'}</button></div>` : ''}`, true));
+  }
+
+  sections.push(todaySection('due', '📅 Due today',
+    (f.dueToday.length ? (dueTotal ? `${unpaidToday.length} bill${unpaidToday.length === 1 ? '' : 's'} · <b>${money(dueTotal)}</b> to go` : '✓ All paid') : 'Nothing due') + (f.soon.length ? ` · ${f.soon.length} in the next 3 days` : ''),
+    `${f.dueToday.length ? ul(f.dueToday.map((b) => billLine(b, 'today')).join('')) : '<p class="small muted" style="margin:0">No bills due today. 🎉</p>'}
+     ${dueTotal && f.checking.length ? `<div class="small" style="margin-top:6px">Checking after today’s bills: <b class="${(f.chkAvail ?? f.chkTotal) - dueTotal >= 0 ? 'good' : 'bad'}">${money((f.chkAvail ?? f.chkTotal) - dueTotal)}</b></div>` : ''}
+     ${f.soon.length ? `<div class="small muted" style="margin:10px 0 2px">Next 3 days</div>${ul(f.soon.map((b) => billLine(b, esc(dayLabel(b.d)))).join(''))}` : ''}`));
+
+  sections.push(todaySection('yesterday', '🧾 Yesterday',
+    `${money(freeTotal)} everyday${f.typical ? ` · <span class="${freeTotal <= f.typical ? 'good' : ''}" style="${freeTotal > f.typical ? 'color:var(--warn)' : ''}">${freeTotal <= f.typical ? 'below' : 'above'} typical</span>` : ''}${f.billsY.length ? ` · ${f.billsY.length} bill${f.billsY.length === 1 ? '' : 's'} paid` : ''}${f.incomeY.length ? ' · money in' : ''}`,
+    `${f.typical ? `<div class="small muted">A typical day is ${money(f.typical)}.</div>` : ''}
+     ${f.freeY.length ? ul(f.freeY.slice(0, 8).map(txLine).join('')) + (f.freeY.length > 8 ? `<p class="small muted">+ ${f.freeY.length - 8} more in Activity</p>` : '') : '<p class="small muted" style="margin:0">No everyday purchases yesterday.</p>'}
+     ${f.billsY.length ? `<div class="small muted" style="margin:10px 0 2px">Bills paid · ${money(f.sum(f.billsY))}</div>${ul(f.billsY.map(txLine).join(''))}` : ''}
+     ${f.incomeY.length ? `<div class="small muted" style="margin:10px 0 2px">Money in</div>${ul(f.incomeY.map(txLine).join(''))}` : ''}`));
+
+  if (f.m) {
+    sections.push(todaySection('paycheck', '🛒 This paycheck',
+      `<b class="${f.m.spent > f.m.cap ? 'bad' : ''}">${money(Math.max(0, f.m.limit - f.m.spent))}</b> left${perDay != null ? ` · ${money(perDay)}/day` : ''}`,
+      `<div class="small">${money(f.m.spent)} of ${money(f.m.limit)} everyday budget used${f.m.cushion ? ` (+ ${money(f.m.cushion)} cushion)` : ''}.</div>
+       ${perDay != null ? `<div class="small" style="margin-top:4px">That’s about <b>${money(perDay)} a day</b> for the ${f.m.daysLeft} day${f.m.daysLeft === 1 ? '' : 's'} until payday (${esc(shortDate(f.m.next))}).</div>` : ''}`));
+  }
+
+  if (f.checking.length) {
+    sections.push(todaySection('checking', '🏦 Checking', `<b>${money(f.chkTotal)}</b>${f.chkAvail != null && Math.abs(f.chkAvail - f.chkTotal) >= 0.01 ? ` · ${money(f.chkAvail)} available` : ''}`,
+      f.checking.map((a) => `<div class="spread small" style="padding:3px 0"><span>${esc(a.name)}</span><span class="num">${money(accountBalance(a))}</span></div>`).join('')));
+  }
+
+  if (f.alerts.length) {
+    sections.push(todaySection('watch', '⚠️ Watch', `${f.alerts.length} thing${f.alerts.length === 1 ? '' : 's'} to check`,
+      `<ul class="list">${f.alerts.map((a) => `<li ${a.attrs}><div class="emoji">${esc(a.icon)}</div><div class="grow small ${a.tone === 'bad' ? 'bad' : ''}">${esc(a.text)}</div></li>`).join('')}</ul>`));
+  }
+
   return `${syncBar()}
     <div class="today-head"><div class="mid">${greet}!</div><div class="muted small">${esc(parseD(f.t0).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }))}</div></div>
-
-    ${localApi?.claude || brief ? `<div class="card brief">
-      <div class="spread"><span class="muted small">✨ Your brief</span>${localApi?.claude ? `<button class="link" data-a="rebrief" ${briefBusy ? 'disabled' : ''}>${briefBusy ? 'Writing…' : 'Refresh'}</button>` : ''}</div>
-      ${brief ? `<div class="brief-text">${mdLite(brief)}</div>` : `<p class="small muted thinking-text">${briefBusy ? 'Writing your brief…' : 'Your brief will appear here.'}</p>`}
-    </div>` : ''}
-
-    <div class="card"><h2>Due today</h2>
-      ${f.dueToday.length ? `<ul class="cat-bills" style="border:0;padding:0;margin:0">${f.dueToday.map((b) => billLine(b, 'today')).join('')}</ul>
-        ${dueTotal ? `<div class="small" style="margin-top:6px">${money(dueTotal)} still to go out today${f.chkAvail != null || f.checking.length ? ` · checking after: <b class="${(f.chkAvail ?? f.chkTotal) - dueTotal >= 0 ? 'good' : 'bad'}">${money((f.chkAvail ?? f.chkTotal) - dueTotal)}</b>` : ''}</div>` : '<div class="small good" style="margin-top:6px">✓ Everything due today is paid.</div>'}`
-        : '<p class="small muted" style="margin:0">No bills due today. 🎉</p>'}
-      ${f.soon.length ? `<div class="small muted" style="margin:12px 0 2px">Next 3 days</div><ul class="cat-bills" style="border:0;padding:0;margin:0">${f.soon.map((b) => billLine(b, esc(dayLabel(b.d)))).join('')}</ul>` : ''}
-    </div>
-
-    <div class="card"><h2>Yesterday</h2>
-      <div class="spread"><div><div class="mid">${money(freeTotal)}</div><div class="small muted">everyday spending${f.typical ? ` · typical day ${money(f.typical)}` : ''}</div></div>
-        ${f.typical ? `<span class="pill ${freeTotal <= f.typical ? 'good' : 'warn'}">${freeTotal <= f.typical ? 'Below typical' : 'Above typical'}</span>` : ''}</div>
-      ${f.freeY.length ? `<ul class="cat-bills charge-list" style="border:0;padding:0">${f.freeY.slice(0, 8).map((t) => txLine(t)).join('')}</ul>${f.freeY.length > 8 ? `<p class="small muted">+ ${f.freeY.length - 8} more in Activity</p>` : ''}` : '<p class="small muted">No everyday purchases yesterday.</p>'}
-      ${f.billsY.length ? `<div class="small muted" style="margin:10px 0 2px">Bills paid · ${money(f.sum(f.billsY))}</div><ul class="cat-bills charge-list" style="border:0;padding:0">${f.billsY.map((t) => txLine(t)).join('')}</ul>` : ''}
-      ${f.incomeY.length ? `<div class="small muted" style="margin:10px 0 2px">Money in</div><ul class="cat-bills charge-list" style="border:0;padding:0">${f.incomeY.map((t) => txLine(t)).join('')}</ul>` : ''}
-    </div>
-
-    ${f.m ? `<div class="card"><h2>This paycheck</h2>
-      <div class="spread"><div><div class="mid ${f.m.spent > f.m.cap ? 'bad' : ''}">${money(Math.max(0, f.m.limit - f.m.spent))}</div><div class="small muted">left for everyday spending</div></div>
-        ${perDay != null ? `<div style="text-align:right"><div class="mid">${money(perDay)}</div><div class="small muted">per day for ${f.m.daysLeft} day${f.m.daysLeft === 1 ? '' : 's'}</div></div>` : ''}</div>
-      <div class="small muted" style="margin-top:6px">${money(f.m.spent)} of ${money(f.m.limit)} used${f.m.cushion ? ` · ${money(f.m.cushion)} cushion` : ''} · payday ${esc(shortDate(f.m.next))}</div>
-    </div>` : ''}
-
-    ${f.checking.length ? `<div class="card"><h2>Checking</h2><div class="mid">${money(f.chkTotal)}</div>${f.chkAvail != null && Math.abs(f.chkAvail - f.chkTotal) >= 0.01 ? `<div class="small muted">Available ${money(f.chkAvail)}</div>` : ''}</div>` : ''}
-
-    ${f.alerts.length ? `<div class="card"><h2>Watch</h2><ul class="list">${f.alerts.map((a) => `<li ${a.attrs}><div class="emoji">${esc(a.icon)}</div><div class="grow small ${a.tone === 'bad' ? 'bad' : ''}">${esc(a.text)}</div></li>`).join('')}</ul></div>` : ''}`;
+    ${sections.join('')}`;
 }
 
 // ---------- One-time data updates ----------
@@ -986,6 +1010,12 @@ function openPasteBills() {
 }
 
 function handleBillsClick(e) {
+  const ts = e.target.closest('[data-todaysec]');
+  if (ts) {
+    const k = ts.dataset.todaysec, st = (state.ui.todayOpen ||= {});
+    const wasOpen = k in st ? st[k] : k === 'brief';
+    st[k] = !wasOpen; save(); render(); return true;
+  }
   if (e.target.closest('[data-upcomingtoggle]')) { state.ui.upcomingOpen = !state.ui.upcomingOpen; save(); render(); return true; }
   if (e.target.closest('[data-paidtoggle]')) { state.ui.paidOpen = !state.ui.paidOpen; save(); render(); return true; }
   if (e.target.closest('[data-monthtoggle]')) { state.ui.monthClosed = !state.ui.monthClosed; save(); render(); return true; }

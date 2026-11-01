@@ -312,3 +312,10 @@ svg.chart text { fill: var(--muted); font-size: 10px; }
 .brief-text { font-size: 15px; line-height: 1.5; margin-top: 6px; }
 .brief-text p { margin: 0 0 6px; } .brief-text ul { margin: 4px 0; padding-left: 20px; } .brief-text li { margin-bottom: 4px; }
 .thinking-text { animation: pulse 1.2s ease-in-out infinite; }
+
+.today-sec { padding: 0; }
+.today-sec-head { width: 100%; display: flex; align-items: center; gap: 10px; background: none; border: 0; padding: 14px 16px; text-align: left; }
+.today-sec-title { display: block; font-size: 12.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.today-sec-sum { display: block; font-size: 15px; margin-top: 2px; color: var(--text); }
+.today-sec-body { padding: 0 16px 14px; }
+.today-sec .chev { font-size: 22px; }

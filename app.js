@@ -84,7 +84,7 @@ function blankState() {
     snapshots: {},    // YYYY-MM-DD -> net worth
     dismissed: {},    // alert keys the user closed
     chat: [],         // Ask Claude conversation
-    ui: { tab: 'home', month: monthOf(today()), txFilter: 'all', txQuery: '', theme: 'auto', remindDays: 3, notify: false,
+    ui: { tab: 'today', month: monthOf(today()), txFilter: 'all', txQuery: '', theme: 'auto', remindDays: 3, notify: false,
       report: { range: 'thisMonth', group: 'category' } },
   };
 }
@@ -1117,6 +1117,7 @@ function applyTheme() {
 document.addEventListener('DOMContentLoaded', () => {
   applyTheme();
   runMigrations();
+  state.ui.tab = 'today'; // always open on the Today page
   render();
   detectLocalApi();
   setInterval(() => { if (localApi && !document.hidden) detectLocalApi(); }, 10 * 60 * 1000); // pick up background syncs
