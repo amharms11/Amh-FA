@@ -73,3 +73,20 @@ The local server only accepts connections from your own computer. `.gitignore` k
 Most banks and card issuers can export transactions as CSV from their website. Use **Settings → Import bank CSV**, choose the account, and confirm which columns hold the date, description and amount.
 
 Linking banks automatically (like commercial apps do) requires a paid aggregator such as Plaid plus a backend server to hold the API secrets. That is out of scope for this private, serverless version.
+
+---
+
+# AMH Studio (`design/`)
+
+A separate, free design app for **digital planners, journals, photo collages and posts**. It lives in its own folder and doesn't touch the finance app or its data.
+
+- **Hyperlinked digital planner**: a full year with a contents page and month tabs that jump between pages in GoodNotes, Notability and other PDF apps
+- **Journals and single pages**: cover, monthly, weekly, daily, habit tracker, journal prompts, lined and dot-grid notes, goals, year in pixels, reading log, budget, vision board
+- **7 coordinated themes** (Sage, Blush, Lavender, Terracotta, Ocean, Midnight, Minimal). One tap restyles every page's colours and fonts.
+- **Editor**: text with 15 fonts, letter spacing and line height; shapes, washi tape, stickers, photo frames, checkboxes and grids; photos with filters and cropping; drag, resize and rotate; layers, lock, undo/redo, links between pages
+- **Export**: PDF (all pages, with working links), PNG or JPG, or a backup file to keep editing on another device
+- Works offline after the first visit. Designs are saved privately on the device (IndexedDB).
+
+Open it at `/design/` on the same host as the finance app (for example `https://<you>.github.io/Amh-FA/design/`). Then in Safari choose Share → **Add to Home Screen**.
+
+`design/vendor/jspdf.umd.min.js` is [jsPDF](https://github.com/parallax/jsPDF) 2.5.1 (MIT licence), bundled so PDF export works offline.

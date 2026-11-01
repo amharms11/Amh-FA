@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <title>AMH Studio</title>
+  <meta name="description" content="Free, private design studio for digital planners, journals, photos and posts." />
+  <meta name="theme-color" content="#faf7f2" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#16151a" media="(prefers-color-scheme: dark)" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="AMH Studio" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Amatic+SC:wght@400;700&family=Caveat:wght@400;700&family=Cinzel:wght@400;700&family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=DM+Serif+Display:ital@0;1&family=Dancing+Script:wght@400;700&family=Homemade+Apple&family=Inter:wght@400;600;700&family=Josefin+Sans:ital,wght@0,400;0,600;0,700;1,400&family=Lora:ital,wght@0,400;0,600;0,700;1,400&family=Montserrat:ital,wght@0,400;0,600;0,700;1,400&family=Nunito:ital,wght@0,400;0,600;0,700;1,400&family=Patrick+Hand&family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Poppins:ital,wght@0,400;0,600;0,700;1,400&display=swap" />
+  <link rel="stylesheet" href="style.css?v=1" />
+</head>
+<body>
+  <!-- Home -->
+  <section id="home" class="screen">
+    <header class="home-top">
+      <div class="brand"><span class="logo">✦</span> AMH Studio</div>
+      <div class="row">
+        <button class="ghost" id="importBtn">Import backup</button>
+      </div>
+    </header>
+    <div class="home-body">
+      <h2 class="h">Create</h2>
+      <div class="create-grid">
+        <button class="create-card" data-new="planner"><span class="cc-ico">📒</span><b>Digital planner</b><small>Linked tabs · 12 months · PDF for GoodNotes</small></button>
+        <button class="create-card" data-new="journal"><span class="cc-ico">📓</span><b>Journal</b><small>Cover, daily prompts, goals, notes</small></button>
+        <button class="create-card" data-new="page"><span class="cc-ico">🗓️</span><b>Single page</b><small>Monthly, weekly, habit tracker…</small></button>
+        <button class="create-card" data-new="blank"><span class="cc-ico">✨</span><b>Blank design</b><small>Posts, stories, wallpapers, posters</small></button>
+        <button class="create-card" data-new="collage"><span class="cc-ico">🖼️</span><b>Photo collage</b><small>Grids you fill with your photos</small></button>
+      </div>
+      <h2 class="h">Your designs</h2>
+      <div id="projectList" class="project-grid"></div>
+      <p class="fine">Everything is saved privately on this device. No account, no ads, no watermark. Use <b>⋯ → Back up</b> on a design to keep a copy.</p>
+    </div>
+    <input type="file" id="importFile" accept=".json,application/json" hidden />
+  </section>
+
+  <!-- Editor -->
+  <section id="editor" class="screen hidden">
+    <header class="ed-top">
+      <button class="icon" id="backBtn" aria-label="Back to home"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <input id="projName" class="proj-name" aria-label="Design name" />
+      <button class="icon" id="undoBtn" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+      <button class="icon" id="redoBtn" aria-label="Redo"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
+      <button class="icon" id="previewBtn" aria-label="Preview"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+      <button class="primary sm" id="exportBtn">Export</button>
+    </header>
+    <main id="stageWrap"><div id="stageInner"><canvas id="stage"></canvas></div></main>
+    <section id="sheet" class="sheet hidden" aria-live="polite">
+      <div class="sheet-head"><b id="sheetTitle"></b><button class="icon sm" id="sheetClose" aria-label="Close panel"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div id="sheetBody" class="sheet-body"></div>
+    </section>
+    <div id="pagebar">
+      <button class="icon sm" id="prevPage" aria-label="Previous page"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <button class="pill" id="pageLabel">Page 1 / 1</button>
+      <button class="icon sm" id="nextPage" aria-label="Next page"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+      <span class="sp"></span>
+      <button class="icon sm" id="zoomOut" aria-label="Zoom out"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+      <button class="pill" id="zoomLabel">Fit</button>
+      <button class="icon sm" id="zoomIn" aria-label="Zoom in"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+    </div>
+    <nav id="toolbar">
+      <button data-tool="templates"><span>🗂️</span>Templates</button>
+      <button data-tool="text"><span class="tt">Aa</span>Text</button>
+      <button data-tool="elements"><span>◆</span>Elements</button>
+      <button data-tool="stickers"><span>🌸</span>Stickers</button>
+      <button data-tool="photos"><span>📷</span>Photos</button>
+      <button data-tool="background"><span>🎨</span>Page</button>
+      <button data-tool="layers"><span>☰</span>Layers</button>
+    </nav>
+    <input type="file" id="photoFile" accept="image/*" multiple hidden />
+  </section>
+
+  <div id="modalRoot"></div>
+  <div id="preview" class="hidden">
+    <canvas id="previewCanvas"></canvas>
+    <div class="pv-bar"><button class="pill" id="pvPrev">‹</button><span id="pvLabel"></span><button class="pill" id="pvNext">›</button><button class="pill" id="pvClose">Done</button></div>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <script src="templates.js?v=1"></script>
+  <script src="render.js?v=1"></script>
+  <script src="app.js?v=1"></script>
+</body>
+</html>

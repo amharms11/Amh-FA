@@ -1,0 +1,14 @@
+{
+  "name": "AMH Studio",
+  "short_name": "Studio",
+  "description": "Free, private design studio for digital planners, journals, photos and posts.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#faf7f2",
+  "theme_color": "#c8674f",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
