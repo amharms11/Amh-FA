@@ -645,6 +645,15 @@ function meterData() {
   const spent = round2(charges.reduce((s, x) => s + x.amount, 0));
   return { limit, cushion, start, next, charges, spent, cap: limit + cushion, daysLeft: Math.max(0, daysFrom(today(), next)), reducedFrom };
 }
+function meterBar(m) {
+  const scale = Math.max(m.cap, m.spent) || 1;
+  const color = m.spent <= m.limit ? 'var(--good)' : m.spent <= m.cap ? 'var(--warn)' : 'var(--bad)';
+  return `<div class="meter" role="meter" aria-valuemin="0" aria-valuemax="${m.cap}" aria-valuenow="${m.spent}" aria-label="Everyday spending">
+      <i class="meter-cushion" style="left:${(m.limit / scale) * 100}%;width:${(m.cushion / scale) * 100}%"></i>
+      <i class="meter-fill" style="width:${Math.min(100, (m.spent / scale) * 100)}%;background:${color}"></i>
+      <i class="meter-mark" style="left:${(m.limit / scale) * 100}%"></i>
+    </div>`;
+}
 function spendingMeterHTML() {
   const m = meterData();
   if (!m) return '';
@@ -662,11 +671,7 @@ function spendingMeterHTML() {
     <button class="meter-head" data-metertoggle aria-expanded="${open}">
       <div class="spread"><span class="muted small">🛒 Everyday spending this paycheck</span><span class="chev ${open ? 'open' : ''}" aria-hidden="true">›</span></div>
       <div class="spread" style="align-items:baseline"><span class="mid" style="color:${fillColor}">${money(spent)}</span><span class="small muted">of ${money(limit)}${cushion ? ` + ${money(cushion)} cushion` : ''}</span></div>
-      <div class="meter" role="meter" aria-valuemin="0" aria-valuemax="${cap}" aria-valuenow="${spent}" aria-label="Everyday spending">
-        <i class="meter-cushion" style="left:${(limit / scale) * 100}%;width:${(cushion / scale) * 100}%"></i>
-        <i class="meter-fill" style="width:${Math.min(100, (spent / scale) * 100)}%;background:${fillColor}"></i>
-        <i class="meter-mark" style="left:${(limit / scale) * 100}%"></i>
-      </div>
+      ${meterBar(m)}
       ${reducedFrom ? `<div class="small muted" style="margin-top:6px">Lowered from ${money(reducedFrom)} so your bills stay covered.</div>` : ''}
       <div class="spread small" style="margin-top:6px"><span>${status}</span><span class="muted" style="white-space:nowrap">resets ${esc(shortDate(next))}${daysLeft ? ` · ${daysLeft} day${daysLeft === 1 ? '' : 's'}` : ''}</span></div>
     </button>
@@ -846,19 +851,21 @@ function viewToday() {
      ${dueTotal && f.checking.length ? `<div class="small" style="margin-top:6px">Checking after today’s bills: <b class="${(f.chkAvail ?? f.chkTotal) - dueTotal >= 0 ? 'good' : 'bad'}">${money((f.chkAvail ?? f.chkTotal) - dueTotal)}</b></div>` : ''}
      ${f.soon.length ? `<div class="small muted" style="margin:10px 0 2px">Next 3 days</div>${ul(f.soon.map((b) => billLine(b, esc(dayLabel(b.d)))).join(''))}` : ''}`));
 
+  if (f.m) {
+    sections.push(todaySection('paycheck', '🛒 This paycheck',
+      `<b class="${f.m.spent > f.m.cap ? 'bad' : ''}">${money(Math.max(0, f.m.limit - f.m.spent))}</b> left${perDay != null ? ` · ${money(perDay)}/day` : ''}
+       <span class="small muted" style="display:block;margin-top:2px">${money(f.m.spent)} of ${money(f.m.limit)}${f.m.cushion ? ` + ${money(f.m.cushion)} cushion` : ''} · payday ${esc(shortDate(f.m.next))}</span>
+       ${meterBar(f.m)}`,
+      `<div class="small">${money(f.m.spent)} of ${money(f.m.limit)} everyday budget used${f.m.cushion ? ` (+ ${money(f.m.cushion)} cushion)` : ''}.</div>
+       ${perDay != null ? `<div class="small" style="margin-top:4px">That’s about <b>${money(perDay)} a day</b> for the ${f.m.daysLeft} day${f.m.daysLeft === 1 ? '' : 's'} until payday (${esc(shortDate(f.m.next))}).</div>` : ''}`));
+  }
+
   sections.push(todaySection('yesterday', '🧾 Yesterday',
     `${money(freeTotal)} everyday${f.typical ? ` · <span class="${freeTotal <= f.typical ? 'good' : ''}" style="${freeTotal > f.typical ? 'color:var(--warn)' : ''}">${freeTotal <= f.typical ? 'below' : 'above'} typical</span>` : ''}${f.billsY.length ? ` · ${f.billsY.length} bill${f.billsY.length === 1 ? '' : 's'} paid` : ''}${f.incomeY.length ? ' · money in' : ''}`,
     `${f.typical ? `<div class="small muted">A typical day is ${money(f.typical)}.</div>` : ''}
      ${f.freeY.length ? ul(f.freeY.slice(0, 8).map(txLine).join('')) + (f.freeY.length > 8 ? `<p class="small muted">+ ${f.freeY.length - 8} more in Activity</p>` : '') : '<p class="small muted" style="margin:0">No everyday purchases yesterday.</p>'}
      ${f.billsY.length ? `<div class="small muted" style="margin:10px 0 2px">Bills paid · ${money(f.sum(f.billsY))}</div>${ul(f.billsY.map(txLine).join(''))}` : ''}
      ${f.incomeY.length ? `<div class="small muted" style="margin:10px 0 2px">Money in</div>${ul(f.incomeY.map(txLine).join(''))}` : ''}`));
-
-  if (f.m) {
-    sections.push(todaySection('paycheck', '🛒 This paycheck',
-      `<b class="${f.m.spent > f.m.cap ? 'bad' : ''}">${money(Math.max(0, f.m.limit - f.m.spent))}</b> left${perDay != null ? ` · ${money(perDay)}/day` : ''}`,
-      `<div class="small">${money(f.m.spent)} of ${money(f.m.limit)} everyday budget used${f.m.cushion ? ` (+ ${money(f.m.cushion)} cushion)` : ''}.</div>
-       ${perDay != null ? `<div class="small" style="margin-top:4px">That’s about <b>${money(perDay)} a day</b> for the ${f.m.daysLeft} day${f.m.daysLeft === 1 ? '' : 's'} until payday (${esc(shortDate(f.m.next))}).</div>` : ''}`));
-  }
 
   if (f.checking.length) {
     sections.push(todaySection('checking', '🏦 Checking', `<b>${money(f.chkTotal)}</b>${f.chkAvail != null && Math.abs(f.chkAvail - f.chkTotal) >= 0.01 ? ` · ${money(f.chkAvail)} available` : ''}`,
