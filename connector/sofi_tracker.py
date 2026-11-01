@@ -212,6 +212,49 @@ document.getElementById('b').onclick = () => h.open();
 </script></body></html>"""
 
 
+ADD_ACCOUNTS_PAGE = """<!doctype html><html><head><meta name=viewport content="width=device-width">
+<title>Add SoFi accounts</title></head>
+<body style="font-family:system-ui;padding:2em;max-width:32em;line-height:1.5">
+<h2>Add new SoFi accounts or vaults</h2>
+<p>Click the button, sign in to SoFi if asked, and <b>tick the new vault or account</b>.
+Keep your existing accounts ticked too.</p>
+<button id=b style="font-size:1.1em;padding:.6em 1.2em">Choose accounts</button>
+<p id=s></p>
+<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+<script>
+const s = document.getElementById('s');
+const h = Plaid.create({
+  token: "%s",
+  onSuccess: async () => {
+    s.textContent = 'Saving and syncing...';
+    const r = await fetch('/api/accounts-added', {method: 'POST', headers: {'X-AMH': '1'}});
+    s.innerHTML = r.ok ? '<b>Done!</b> Close this tab and go back to AMH Finance &mdash; the new account will show up there.'
+                       : 'Something went wrong while syncing. Close this tab and tap Sync now in AMH Finance.';
+  },
+  onExit: (err) => { if (err) s.textContent = 'Error: ' + (err.display_message || err.error_message); }
+});
+document.getElementById('b').onclick = () => h.open();
+</script></body></html>"""
+
+
+def _update_link_token(c):
+    """Plaid Link in update mode with account selection, to share accounts opened after linking."""
+    from plaid.model.country_code import CountryCode
+    from plaid.model.link_token_create_request import LinkTokenCreateRequest
+    from plaid.model.link_token_create_request_update import LinkTokenCreateRequestUpdate
+    from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
+
+    req = LinkTokenCreateRequest(
+        user=LinkTokenCreateRequestUser(client_user_id="me"),
+        client_name="SoFi Tracker",
+        country_codes=[CountryCode("US")],
+        language="en",
+        access_token=access_token(),
+        update=LinkTokenCreateRequestUpdate(account_selection_enabled=True),
+    )
+    return c.link_token_create(req).link_token
+
+
 def _link_token(c):
     from plaid.model.country_code import CountryCode
     from plaid.model.link_token_create_request import LinkTokenCreateRequest
@@ -608,6 +651,18 @@ def run_app(port=APP_PORT):
                                    "claude": state["claude"] or None,
                                    "autosync": last_autosync(),
                                    "autosync_installed": (Path.home() / "Library/LaunchAgents/com.amhfinance.autosync.plist").exists()})
+            if path == "/connect-accounts":
+                try:
+                    page = (ADD_ACCOUNTS_PAGE % _update_link_token(client())).encode()
+                except Exception as e:  # noqa: BLE001 - shown to the user
+                    msg = plaid_problem(e)[1] if hasattr(e, "body") else str(e)
+                    page = (f"<p style='font-family:system-ui;padding:2em'>Couldn't start: {msg}<br>"
+                            "Make sure SoFi is connected (open AMH Finance and type k).</p>").encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(page)))
+                self.end_headers()
+                return self.wfile.write(page)
             if path == "/api/export":
                 return self._json(build_export(load_store()))
             if path.startswith(("/.git", "/connector", "/api")):
@@ -618,10 +673,10 @@ def run_app(port=APP_PORT):
             if not self._ok_request():
                 return
             path = self.path.split("?")[0]
-            if path not in ("/api/sync", "/api/ask") or self.headers.get("X-AMH") != "1":
+            if path not in ("/api/sync", "/api/ask", "/api/accounts-added") or self.headers.get("X-AMH") != "1":
                 return self.send_error(404)
             try:
-                if path == "/api/sync":
+                if path in ("/api/sync", "/api/accounts-added"):
                     sync()
                     return self._json(build_export(load_store()))
                 length = int(self.headers.get("Content-Length") or 0)

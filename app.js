@@ -652,7 +652,7 @@ function importPlaidFlow(data) {
   openForm({
     title: 'Match bank accounts',
     saveLabel: 'Import',
-    extraHTML: '<p class="muted small">New accounts from your bank. Link each to an account you already track, or create it. This is remembered for future syncs.</p>',
+    extraHTML: '<p class="muted small">New accounts from SoFi (for example a new vault). Choose “Create new account” to add it, or link it to one you already track. This is remembered for future syncs.</p>',
     fields: unmapped.map((a) => ({
       key: a.account_id, type: 'select',
       label: `${a.name}${a.mask ? ' ••' + a.mask : ''}${a.current != null ? ' — ' + money(a.current) : ''}`,
@@ -735,6 +735,7 @@ async function detectLocalApi() {
       const data = await (await fetch('api/export', { cache: 'no-store' })).json();
       const parsed = parsePlaidFile(data);
       if (parsed && parsed.accounts.every((a) => state.accounts.some((x) => x.plaidId === a.account_id))) { applyPlaid(parsed); save(); render(); }
+      else if (parsed && !document.querySelector('.sheet')) importPlaidFlow(data); // a new account/vault appeared: ask where it goes
     }
   } catch { /* not running under the local server */ }
 }
@@ -782,7 +783,7 @@ function openSettings() {
   const ruleCount = Object.keys(state.rules).length;
   openSheet('Settings', `
     <div class="card"><h2>Data</h2>
-      ${localApi?.connected ? '<button class="btn" data-a="syncnow">Sync with SoFi now</button><div class="btn-row"><button class="btn secondary" data-a="plaid">Import SoFi sync file</button></div>' : '<button class="btn" data-a="plaid">Import SoFi sync file</button>'}
+      ${localApi?.connected ? '<button class="btn" data-a="syncnow">Sync with SoFi now</button><div class="btn-row"><button class="btn secondary" data-a="addsofiaccts">➕ Add new SoFi accounts or vaults</button></div><div class="btn-row"><button class="btn secondary" data-a="plaid">Import SoFi sync file</button></div>' : '<button class="btn" data-a="plaid">Import SoFi sync file</button>'}
       ${state.sync ? `<p class="muted small" style="margin:6px 0 0">Last sync: ${syncLabel()}</p>` : ''}
       ${localApi ? `<p class="small" style="margin:6px 0 0">${autosyncLabel()}</p>` : ''}
       <div class="btn-row"><button class="btn secondary" data-a="csv">Import bank CSV</button></div>
@@ -849,6 +850,7 @@ function openSettings() {
       });
       if (a === 'newcat') { closeSheet(); newCategoryForm(); }
       if (a === 'askopen') { closeSheet(); openAsk(); }
+      if (a === 'addsofiaccts') { window.open('connect-accounts', '_blank'); toast('Finish in the new tab, then come back here'); }
       if (a === 'accountsview') { closeSheet(); goto('accounts'); }
       if (a === 'notify') {
         if (state.ui.notify) { state.ui.notify = false; save(); closeSheet(); openSettings(); return; }
@@ -1118,6 +1120,7 @@ document.addEventListener('DOMContentLoaded', () => {
   render();
   detectLocalApi();
   setInterval(() => { if (localApi && !document.hidden) detectLocalApi(); }, 10 * 60 * 1000); // pick up background syncs
+  window.addEventListener('focus', () => { if (localApi) detectLocalApi(); }); // e.g. back from adding a SoFi account
 
   $('.tabbar').addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) goto(b.dataset.tab); });
   $('#addBtn').addEventListener('click', () => (state.ui.tab === 'accounts' ? accountForm() : state.ui.tab === 'recurring' ? recurringForm() : txForm()));
