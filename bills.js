@@ -616,12 +616,15 @@ function billPaymentIds(from, to) {
   state.transactions.forEach((t) => { if (t.recurringId) ids.add(t.id); });
   return ids;
 }
+/** Free (unplanned) spending: money out in categories that don't have a bill. Refunds, credits,
+ *  transfers, income, bill payments, and anything in a category covered by a bill are left out. */
 function everydayCharges(from, to) {
   const billIds = billPaymentIds(from, to), out = [];
+  const billCats = new Set(state.recurrings.map((r) => r.categoryId));
   for (const t of state.transactions) {
-    if (t.date < from || t.date > to || billIds.has(t.id) || isOwnMove(t.payee)) continue;
-    const amt = parts(t).reduce((s, p) => s + (cat(p.categoryId).kind === 'expense' ? -p.amount : 0), 0);
-    if (Math.abs(amt) >= 0.005) out.push({ t, amount: round2(amt) });
+    if (t.date < from || t.date > to || t.amount >= 0 || billIds.has(t.id) || isOwnMove(t.payee)) continue;
+    const amt = parts(t).reduce((s, p) => s + (p.amount < 0 && cat(p.categoryId).kind === 'expense' && !billCats.has(p.categoryId) ? -p.amount : 0), 0);
+    if (amt >= 0.005) out.push({ t, amount: round2(amt) });
   }
   return out.sort((a, b) => b.t.date.localeCompare(a.t.date));
 }
@@ -655,8 +658,8 @@ function spendingMeterHTML() {
       </div>
       <div class="spread small" style="margin-top:6px"><span>${status}</span><span class="muted" style="white-space:nowrap">resets ${esc(shortDate(next))}${daysLeft ? ` · ${daysLeft} day${daysLeft === 1 ? '' : 's'}` : ''}</span></div>
     </button>
-    ${open ? (charges.length ? `<ul class="cat-bills charge-list">${charges.slice(0, 100).map(({ t, amount }) => `<li data-tx="${t.id}"><div class="grow" style="min-width:0"><div class="ellipsis">${esc(t.payee)}${t.pending ? ' <span class="pill warn">Pending</span>' : ''}</div><div class="muted small">${esc(shortDate(t.date))} · ${esc(t.splits?.length ? '✂️ split' : cat(t.categoryId).name)}</div></div><span class="num ${amount < 0 ? 'good' : ''}">${amount < 0 ? '+' : ''}${money(Math.abs(amount))}</span></li>`).join('')}</ul>
-      <p class="small muted" style="margin:6px 0 0">Counted since your payday on ${esc(shortDate(start))}. Bills, vault transfers and income aren’t included. Tap a charge to change it.</p>`
+    ${open ? (charges.length ? `<ul class="cat-bills charge-list">${charges.slice(0, 100).map(({ t, amount }) => `<li data-tx="${t.id}"><div class="grow" style="min-width:0"><div class="ellipsis">${esc(t.payee)}${t.pending ? ' <span class="pill warn">Pending</span>' : ''}</div><div class="muted small">${esc(shortDate(t.date))} · ${esc(t.splits?.length ? '✂️ split' : cat(t.categoryId).name)}</div></div><span class="num">${money(amount)}</span></li>`).join('')}</ul>
+      <p class="small muted" style="margin:6px 0 0">Free spending since your payday on ${esc(shortDate(start))} — purchases in categories without a bill. Bills and their categories (like groceries, if you have a groceries bill), transfers, refunds and income aren’t included. Tap a charge to change its category.</p>`
       : `<p class="small muted" style="margin:8px 0 0">No everyday spending yet since your payday on ${esc(shortDate(start))}.</p>`) : ''}
   </div>`;
 }
