@@ -2,6 +2,9 @@
 
 A private personal finance tracker: spending, budgets, recurring bills and subscriptions, savings goals, and net worth. It is a plain HTML/CSS/JS installable web app (PWA). It has **no server, no accounts and no tracking**. All data stays in your browser's local storage on your device.
 
+## Also in this repo
+**[Booking HQ](booking/)**: a separate app for running a cleaning booking business (leads, quotes, job dispatch to cleaners, profit per job). See `booking/README.md`.
+
 ## Features
 - **Ask Claude** (✨ button): ask questions about your money in plain English, e.g. "How much did I spend eating out last month?". It uses your Claude account through Claude Code (set it up from the Desktop launcher by typing `c`), or an Anthropic API key if you add `ANTHROPIC_API_KEY=...` to `~/.sofi-tracker/config.env`. Your question and a summary of your finances are sent to Claude to answer.
 - **Bills** tab: each bill has a budgeted amount and a due date (one-off amounts, variable bills like electric, autopay), with budget-vs-actual. A **paycheck plan** detects your paycheck from deposits and splits each upcoming paycheck into bills, set-asides for yearly bills, everyday spending and savings. Each bill is paid from the last paycheck that arrives before it's due, overloaded paychecks pay some bills early, and extra from one paycheck is kept for the next one's bills.

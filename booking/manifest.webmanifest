@@ -1,0 +1,11 @@
+{
+  "name": "Booking HQ",
+  "short_name": "Booking HQ",
+  "description": "Run a cleaning booking business: leads, quotes, job dispatch, cleaners and profit.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f7f6",
+  "theme_color": "#0f9d8a",
+  "icons": [{ "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Get a Quote</title>
+  <meta name="description" content="Instant price for your home cleaning." />
+  <meta name="robots" content="noindex" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="styles.css?v=1" />
+  <style>
+    body { padding-bottom: 40px; }
+    .hero { text-align: center; padding: 28px 8px 12px; }
+    .hero h1 { margin: 10px 0 4px; font-size: 24px; }
+    .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .opt { border: 1px solid var(--line); background: var(--surface); border-radius: 14px; padding: 12px; text-align: left; }
+    .opt b { display: block; }
+    .opt span { font-size: 12.5px; color: var(--muted); }
+    .opt.on { border-color: var(--accent); background: var(--accent-soft); }
+    .stepper { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; }
+    .stepper div { display: flex; align-items: center; gap: 14px; }
+    .stepper button { width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); font-size: 20px; }
+    .stepper b { min-width: 28px; text-align: center; font-size: 18px; }
+    .price-bar { position: sticky; bottom: 10px; z-index: 5; }
+    .save { color: var(--good); font-weight: 650; }
+  </style>
+</head>
+<body>
+  <main id="app"></main>
+  <script src="pricing.js?v=1"></script>
+  <script>
+  'use strict';
+  const data = decodeQuoteData((location.hash.match(/d=([^&]+)/) || [])[1] || '') || {};
+  const pr = data.pr || DEFAULT_PRICING;
+  const L = data.l || {};
+  const st = { beds: L.beds ?? 2, baths: L.baths ?? 2, type: L.type || 'standard', freq: L.freq || 'biweekly', addons: L.addons || [], name: L.name || '', address: '', date: '', notes: '' };
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const biz = data.n || 'Home Cleaning';
+  document.title = biz + ' · Quote';
+  const TYPE_DESC = { standard: 'Regular upkeep: kitchen, baths, dusting, floors', deep: 'Top-to-bottom: baseboards, grout, buildup', move: 'Empty home, inside cabinets & appliances' };
+
+  function render() {
+    const q = priceQuote(st, pr);
+    const once = priceQuote({ ...st, freq: 'once' }, pr);
+    const app = document.getElementById('app');
+    const focus = document.activeElement && document.activeElement.name;
+    app.innerHTML = `
+    <div class="hero"><img src="icons/icon.svg" width="56" height="56" alt="" style="border-radius:14px"/>
+      <h1>${esc(biz)}</h1><div class="muted">${st.name ? 'Hi ' + esc(st.name.split(' ')[0]) + '! ' : ''}Your instant cleaning price${data.ar ? ' · ' + esc(data.ar) : ''}</div></div>
+    <div class="card"><h2>Your home</h2>
+      ${stepper('beds', 'Bedrooms', 0, 1)}${stepper('baths', 'Bathrooms', 1, 0.5)}</div>
+    <div class="card"><h2>Type of clean</h2><div class="opts" style="grid-template-columns:1fr">
+      ${Object.entries(pr.types).map(([k, t]) => `<button class="opt ${st.type === k ? 'on' : ''}" data-set="type" data-v="${k}"><b>${esc(t.label)} · ${fmtMoney(priceQuote({ ...st, type: k, freq: 'once', addons: [] }, pr).clean)}</b><span>${TYPE_DESC[k] || ''}</span></button>`).join('')}</div></div>
+    ${st.type !== 'move' ? `<div class="card"><h2>How often</h2><div class="opts">
+      ${Object.entries(pr.freqs).map(([k, f]) => `<button class="opt ${q.freq === k ? 'on' : ''}" data-set="freq" data-v="${k}"><b>${esc(f.label)}</b><span>${f.discount && st.type === 'standard' ? `<span class="save">Save ${fmtMoney(f.discount)}</span> per visit` : f.discount ? 'Recurring standard cleans' : 'No commitment'}</span></button>`).join('')}</div>
+      ${st.type === 'deep' && q.freq !== 'once' ? `<p class="small muted" style="margin:10px 0 0">Your first visit is a deep clean. After that, ${esc(pr.freqs[q.freq].label.toLowerCase())} standard cleans are ${fmtMoney(priceQuote({ ...st, type: 'standard', addons: [] }, pr).total)}.</p>` : ''}</div>` : ''}
+    <div class="card"><h2>Extras</h2><div class="chips">
+      ${Object.entries(pr.addons).map(([k, a]) => `<button class="chip ${st.addons.includes(k) ? 'on' : ''}" data-addon="${k}">${esc(a.label)} +${fmtMoney(a.price)}</button>`).join('')}</div></div>
+    <div class="card"><h2>Book it</h2>
+      <label class="field"><span>Your name</span><input name="name" value="${esc(st.name)}" autocomplete="name"/></label>
+      <label class="field"><span>Address</span><input name="address" value="${esc(st.address)}" autocomplete="street-address"/></label>
+      <label class="field"><span>Preferred day & time</span><input name="date" value="${esc(st.date)}" placeholder="e.g. Friday morning"/></label>
+      <label class="field"><span>Anything we should know? (pets, entry, focus areas)</span><textarea name="notes">${esc(st.notes)}</textarea></label>
+      <p class="small muted" style="margin:0">Background-checked, insured cleaners who bring their own supplies.${data.cf ? ` Free cancellation with 24 hours' notice (${fmtMoney(data.cf)} fee after that).` : ''}</p>
+    </div>
+    <div class="card price-bar">
+      <div class="spread"><div><div class="muted small">${esc(pr.types[q.type].label)}${q.freq !== 'once' ? ' · ' + esc(pr.freqs[q.freq].label.toLowerCase()) : ''}</div>
+        <div class="big">${fmtMoney(q.total)}</div>${q.discount ? `<div class="small"><s class="muted">${fmtMoney(once.total)}</s> <span class="save">You save ${fmtMoney(q.discount)} every visit</span></div>` : ''}</div></div>
+      <div class="btn-row">
+        ${data.pay ? `<a class="btn" href="${esc(data.pay)}" target="_blank" rel="noopener" id="payBtn">Book & pay online</a>` : ''}
+        ${data.ph ? `<a class="btn ${data.pay ? 'secondary' : ''}" href="${esc(sms(q))}">Text us to book</a>` : ''}
+      </div>
+      ${!data.pay && !data.ph ? '<p class="small muted">Contact the business to book this price.</p>' : ''}
+    </div>`;
+    if (focus) { const el = app.querySelector(`[name="${focus}"]`); if (el) { el.focus(); const v = el.value; el.value = ''; el.value = v; } }
+  }
+  function stepper(k, label, min, step) {
+    return `<div class="stepper"><span>${label}</span><div><button data-step="${k}" data-d="${-step}" data-min="${min}" aria-label="Fewer ${label.toLowerCase()}">−</button><b>${st[k]}</b><button data-step="${k}" data-d="${step}" aria-label="More ${label.toLowerCase()}">+</button></div></div>`;
+  }
+  function sms(q) {
+    const body = `Hi! I'd like to book a ${pr.types[q.type].label.toLowerCase()} (${q.beds} bed / ${q.baths} bath${q.freq !== 'once' ? ', ' + pr.freqs[q.freq].label.toLowerCase() : ''}${st.addons.length ? ', + ' + st.addons.map((a) => pr.addons[a].label.toLowerCase()).join(', ') : ''}) for ${fmtMoney(q.total)}.`
+      + (st.name ? `\nName: ${st.name}` : '') + (st.address ? `\nAddress: ${st.address}` : '') + (st.date ? `\nWhen: ${st.date}` : '') + (st.notes ? `\nNotes: ${st.notes}` : '');
+    return `sms:${String(data.ph).replace(/[^\d+]/g, '')}?&body=${encodeURIComponent(body)}`;
+  }
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.set) st[b.dataset.set] = b.dataset.v;
+    if (b.dataset.addon) { const k = b.dataset.addon; st.addons = st.addons.includes(k) ? st.addons.filter((x) => x !== k) : [...st.addons, k]; }
+    if (b.dataset.step) { const k = b.dataset.step; st[k] = Math.max(Number(b.dataset.min || 0), Math.min(10, st[k] + Number(b.dataset.d))); }
+    render();
+  });
+  document.addEventListener('input', (e) => {
+    if (!e.target.name || !(e.target.name in st)) return;
+    st[e.target.name] = e.target.value;
+    // Update only the text link so typing isn't interrupted.
+    const a = document.querySelector('a[href^="sms:"]'); if (a) a.href = sms(priceQuote(st, pr));
+  });
+  render();
+  </script>
+</body>
+</html>
