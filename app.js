@@ -939,7 +939,7 @@ function viewHome() {
       ${open && upcoming.length ? `<ul class="list" style="margin-top:6px">${upcoming.map(({ r, d }) => `<li data-rec="${r.id}" data-date="${d}"><div class="emoji">${esc(r.emoji)}</div><div class="grow"><div class="title">${esc(r.name)}</div><div class="sub">${esc(dayLabel(d))}</div></div><div class="num">${money(r.amount)}</div></li>`).join('')}</ul>
         <button class="link" data-goto="recurring" style="margin-top:6px">All bills ›</button>` : ''}
     </div>`;
-  })()}${askCard()}${alertsCard()}
+  })()}${alertsCard()}
   <div class="card"><h2>Spent in ${esc(monthLabel(ym, true))} <button class="link" data-goto="budgets">Budgets</button></h2>
     <div class="hero">
       <div class="ring-wrap">${ring(budget ? spent / budget : 0, budget && spent > budget ? 'var(--bad)' : budget && spent > pace ? 'var(--warn)' : 'var(--accent)')}
