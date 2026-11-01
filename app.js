@@ -1054,8 +1054,10 @@ function viewRecurring() {
       <div class="grow"><div class="mid">${money(paidSum, true)}</div><div class="muted small">paid so far of ${money(totalSum, true)} this month</div>
       <div class="muted small" style="margin-top:6px">≈ ${money(monthly, true)}/mo · ${money(monthly * 12, true)}/yr in recurring costs</div></div>
     </div></div>
-    <div class="section-title spread"><span>This month</span><button class="link" data-a="newrec">+ Add</button></div>
-    ${items.length ? `<div class="tiles">${items.map(tile).join('')}</div>` : '<div class="card empty"><div class="e">🔁</div>Add subscriptions and bills to see what’s due and what’s paid.</div>'}
+    ${items.length ? `<button class="section-toggle" data-monthtoggle aria-expanded="${!state.ui.monthClosed}">
+        <span>This month <span class="muted">· ${items.filter((i) => i.paid).length} of ${items.length} paid${items.some((i) => !i.paid) ? ` · ${money(items.filter((i) => !i.paid).reduce((s, i) => s + i.r.amount, 0), true)} to go` : ''}</span></span><span class="chev ${state.ui.monthClosed ? '' : 'open'}" aria-hidden="true">›</span></button>
+      ${state.ui.monthClosed ? '' : `<div class="tiles">${items.map(tile).join('')}</div>`}`
+      : '<div class="section-title">This month</div><div class="card empty"><div class="e">🔁</div>Add subscriptions and bills to see what’s due and what’s paid.</div>'}
     ${future.length ? `<button class="section-toggle" data-futuretoggle aria-expanded="${!!state.ui.futureOpen}">
         <span>In the future <span class="muted">· ${future.length} bill${future.length === 1 ? '' : 's'} · next ${esc(shortDate(future[0].d))}</span></span><span class="chev ${state.ui.futureOpen ? 'open' : ''}" aria-hidden="true">›</span></button>
       ${state.ui.futureOpen ? `<ul class="list card" style="padding:2px 14px">${future.map(({ r, d }) => `<li data-rec="${r.id}" data-date="${d}"><div class="emoji">${esc(r.emoji)}</div><div class="grow"><div class="title">${esc(r.name)}</div><div class="sub">${esc(r.freq)} · next ${esc(shortDate(d))}</div></div><div class="num">${money(r.amount)}</div></li>`).join('')}</ul>` : ''}` : ''}
