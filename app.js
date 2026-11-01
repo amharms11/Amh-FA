@@ -927,7 +927,7 @@ function viewHome() {
   const recent = [...state.transactions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
   const trend = Array.from({ length: 6 }, (_, i) => addMonths(ym, i - 5)).map((m) => ({ label: monthLabel(m, true), value: monthTotals(m).spent, highlight: m === ym }));
 
-  return `${checkingCard()}${syncBar()}${askCard()}${alertsCard()}
+  return `${syncBar()}${checkingCard()}${spendingMeterHTML()}${askCard()}${alertsCard()}
   <div class="card"><h2>Spent in ${esc(monthLabel(ym, true))} <button class="link" data-goto="budgets">Budgets</button></h2>
     <div class="hero">
       <div class="ring-wrap">${ring(budget ? spent / budget : 0, budget && spent > budget ? 'var(--bad)' : budget && spent > pace ? 'var(--warn)' : 'var(--accent)')}

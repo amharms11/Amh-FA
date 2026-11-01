@@ -597,6 +597,70 @@ function onRecategorize(sel) {
   });
 }
 
+// ---------- Home: everyday spending meter for this paycheck ----------
+function currentPayPeriod(p) {
+  const t0 = today();
+  const days = paydays(p, addDays(t0, -45), addDays(t0, 45));
+  const start = days.filter((d) => d <= t0).pop() || addDays(t0, -Math.round(365 / perYear(p)));
+  const next = days.find((d) => d > t0) || addDays(start, Math.round(365 / perYear(p)));
+  return { start, next };
+}
+/** Transactions that are bill payments (so they aren't counted as everyday spending). */
+function billPaymentIds(from, to) {
+  const ids = new Set();
+  for (const r of state.recurrings) {
+    for (let ym = monthOf(addDays(from, -10)); `${ym}-01` <= addDays(to, 10); ym = addMonths(ym, 1)) {
+      for (const d of occurrencesInMonth(r, ym)) { const t = findPayment(r, d); if (t) ids.add(t.id); }
+    }
+  }
+  state.transactions.forEach((t) => { if (t.recurringId) ids.add(t.id); });
+  return ids;
+}
+function everydayCharges(from, to) {
+  const billIds = billPaymentIds(from, to), out = [];
+  for (const t of state.transactions) {
+    if (t.date < from || t.date > to || billIds.has(t.id) || isOwnMove(t.payee)) continue;
+    const amt = parts(t).reduce((s, p) => s + (cat(p.categoryId).kind === 'expense' ? -p.amount : 0), 0);
+    if (Math.abs(amt) >= 0.005) out.push({ t, amount: round2(amt) });
+  }
+  return out.sort((a, b) => b.t.date.localeCompare(a.t.date));
+}
+function spendingMeterHTML() {
+  const p = state.paycheck;
+  if (!p?.amount) return '';
+  let limit, cushion;
+  if ((p.method || 'even') === 'even') { const e = buildEvenPlan(); if (!e) return ''; limit = e.spending; cushion = Math.max(0, e.left); }
+  else { const plan = buildPaycheckPlan(); const c = plan?.checks[0]; if (!c) return ''; limit = c.spending; cushion = Math.max(0, c.left); }
+  if (!(limit > 0)) return '';
+  const { start, next } = currentPayPeriod(p);
+  const charges = everydayCharges(start, addDays(next, -1));
+  const spent = round2(charges.reduce((s, x) => s + x.amount, 0));
+  const cap = limit + cushion;
+  const scale = Math.max(cap, spent) || 1;
+  const zone = spent <= limit ? 'ok' : spent <= cap ? 'cushion' : 'over';
+  const fillColor = zone === 'ok' ? 'var(--good)' : zone === 'cushion' ? 'var(--warn)' : 'var(--bad)';
+  const daysLeft = Math.max(0, daysFrom(today(), next));
+  const status = zone === 'ok' ? `<b class="good">${money(limit - spent)} left</b> to spend`
+    : zone === 'cushion' ? `<b style="color:var(--warn)">Using your cushion</b> — ${money(cap - spent)} of ${money(cushion)} left`
+    : `<b class="bad">Over by ${money(spent - cap)}</b>`;
+  const open = !!state.ui.meterOpen;
+  return `<div class="card meter-card">
+    <button class="meter-head" data-metertoggle aria-expanded="${open}">
+      <div class="spread"><span class="muted small">🛒 Everyday spending this paycheck</span><span class="chev ${open ? 'open' : ''}" aria-hidden="true">›</span></div>
+      <div class="spread" style="align-items:baseline"><span class="mid" style="color:${fillColor}">${money(spent)}</span><span class="small muted">of ${money(limit)}${cushion ? ` + ${money(cushion)} cushion` : ''}</span></div>
+      <div class="meter" role="meter" aria-valuemin="0" aria-valuemax="${cap}" aria-valuenow="${spent}" aria-label="Everyday spending">
+        <i class="meter-cushion" style="left:${(limit / scale) * 100}%;width:${(cushion / scale) * 100}%"></i>
+        <i class="meter-fill" style="width:${Math.min(100, (spent / scale) * 100)}%;background:${fillColor}"></i>
+        <i class="meter-mark" style="left:${(limit / scale) * 100}%"></i>
+      </div>
+      <div class="spread small" style="margin-top:6px"><span>${status}</span><span class="muted" style="white-space:nowrap">resets ${esc(shortDate(next))}${daysLeft ? ` · ${daysLeft} day${daysLeft === 1 ? '' : 's'}` : ''}</span></div>
+    </button>
+    ${open ? (charges.length ? `<ul class="cat-bills charge-list">${charges.slice(0, 100).map(({ t, amount }) => `<li data-tx="${t.id}"><div class="grow" style="min-width:0"><div class="ellipsis">${esc(t.payee)}${t.pending ? ' <span class="pill warn">Pending</span>' : ''}</div><div class="muted small">${esc(shortDate(t.date))} · ${esc(t.splits?.length ? '✂️ split' : cat(t.categoryId).name)}</div></div><span class="num ${amount < 0 ? 'good' : ''}">${amount < 0 ? '+' : ''}${money(Math.abs(amount))}</span></li>`).join('')}</ul>
+      <p class="small muted" style="margin:6px 0 0">Counted since your payday on ${esc(shortDate(start))}. Bills, vault transfers and income aren’t included. Tap a charge to change it.</p>`
+      : `<p class="small muted" style="margin:8px 0 0">No everyday spending yet since your payday on ${esc(shortDate(start))}.</p>`) : ''}
+  </div>`;
+}
+
 // ---------- One-time data updates ----------
 function runMigrations() {
   const m = (state.migrations ||= {});
@@ -732,6 +796,7 @@ function openPasteBills() {
 }
 
 function handleBillsClick(e) {
+  if (e.target.closest('[data-metertoggle]')) { state.ui.meterOpen = !state.ui.meterOpen; save(); render(); return true; }
   if (e.target.closest('[data-futuretoggle]')) { state.ui.futureOpen = !state.ui.futureOpen; save(); render(); return true; }
   if (e.target.closest('select.recat')) return true; // let the picker work without opening the budget
   const cc = e.target.closest('[data-catcharges]');

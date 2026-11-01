@@ -299,3 +299,10 @@ svg.chart text { fill: var(--muted); font-size: 10px; }
 
 .section-toggle { width: 100%; display: flex; justify-content: space-between; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin: 18px 0 10px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text); box-shadow: var(--shadow); }
 .section-toggle .muted { text-transform: none; letter-spacing: 0; font-weight: 500; }
+
+.meter-head { width: 100%; background: none; border: 0; padding: 0; text-align: left; display: block; }
+.meter { position: relative; height: 14px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); overflow: hidden; margin-top: 8px; }
+.meter i { position: absolute; top: 0; bottom: 0; display: block; }
+.meter-fill { left: 0; border-radius: 8px; transition: width .3s; }
+.meter-cushion { background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--warn) 28%, transparent) 0 6px, color-mix(in srgb, var(--warn) 12%, transparent) 6px 12px); }
+.meter-mark { width: 2px; background: var(--text); opacity: .55; }
