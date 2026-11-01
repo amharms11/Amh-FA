@@ -661,6 +661,23 @@ function spendingMeterHTML() {
   </div>`;
 }
 
+// ---------- Bills tab: which bills are paid this month ----------
+function paidBillsDropdown(items) {
+  const paid = items.filter((i) => i.paid).map((i) => ({ ...i, tx: findPayment(i.r, i.d) })).filter((i) => i.tx)
+    .sort((a, b) => b.tx.date.localeCompare(a.tx.date));
+  if (!items.length) return '';
+  const open = !!state.ui.paidOpen;
+  const total = paid.reduce((s, i) => s + Math.abs(i.tx.amount), 0);
+  return `<button class="cat-bills-toggle" data-paidtoggle aria-expanded="${open}" style="margin-top:12px">✓ ${paid.length ? `See what’s paid (${paid.length})` : 'Nothing paid yet this month'} <span class="chev ${open ? 'open' : ''}" aria-hidden="true">›</span></button>
+    ${open && paid.length ? `<ul class="cat-bills">${paid.map((i) => {
+      const actual = Math.abs(i.tx.amount), diff = round2(actual - i.r.amount);
+      return `<li data-rec="${i.r.id}" data-date="${i.d}"><span class="bill-emoji">${esc(i.r.emoji)}</span>
+        <span class="grow">${esc(i.r.name)}<span class="muted"> · paid ${esc(shortDate(i.tx.date))}${Math.abs(diff) >= 1 ? ` · <span class="${diff > 0 ? 'bad' : 'good'}">${money(Math.abs(diff))} ${diff > 0 ? 'over' : 'under'} budget</span>` : ''}</span></span>
+        <span class="num">${money(actual)}</span></li>`;
+    }).join('')}</ul>
+      <div class="spread small" style="margin-top:6px"><span class="muted">Total paid</span><b class="num">${money(total)}</b></div>` : ''}`;
+}
+
 // ---------- One-time data updates ----------
 function runMigrations() {
   const m = (state.migrations ||= {});
@@ -796,6 +813,7 @@ function openPasteBills() {
 }
 
 function handleBillsClick(e) {
+  if (e.target.closest('[data-paidtoggle]')) { state.ui.paidOpen = !state.ui.paidOpen; save(); render(); return true; }
   if (e.target.closest('[data-monthtoggle]')) { state.ui.monthClosed = !state.ui.monthClosed; save(); render(); return true; }
   if (e.target.closest('[data-metertoggle]')) { state.ui.meterOpen = !state.ui.meterOpen; save(); render(); return true; }
   if (e.target.closest('[data-futuretoggle]')) { state.ui.futureOpen = !state.ui.futureOpen; save(); render(); return true; }

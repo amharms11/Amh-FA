@@ -1053,7 +1053,8 @@ function viewRecurring() {
       <div class="ring-wrap">${ring(totalSum ? paidSum / totalSum : 0)}<div class="ring-label"><div><b>${items.filter((i) => i.paid).length}/${items.length}</b>paid</div></div></div>
       <div class="grow"><div class="mid">${money(paidSum, true)}</div><div class="muted small">paid so far of ${money(totalSum, true)} this month</div>
       <div class="muted small" style="margin-top:6px">≈ ${money(monthly, true)}/mo · ${money(monthly * 12, true)}/yr in recurring costs</div></div>
-    </div></div>
+    </div>
+    ${paidBillsDropdown(items)}</div>
     ${items.length ? `<button class="section-toggle" data-monthtoggle aria-expanded="${!state.ui.monthClosed}">
         <span>This month <span class="muted">· ${items.filter((i) => i.paid).length} of ${items.length} paid${items.some((i) => !i.paid) ? ` · ${money(items.filter((i) => !i.paid).reduce((s, i) => s + i.r.amount, 0), true)} to go` : ''}</span></span><span class="chev ${state.ui.monthClosed ? '' : 'open'}" aria-hidden="true">›</span></button>
       ${state.ui.monthClosed ? '' : `<div class="tiles">${items.map(tile).join('')}</div>`}`
