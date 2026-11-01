@@ -927,7 +927,19 @@ function viewHome() {
   const recent = [...state.transactions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
   const trend = Array.from({ length: 6 }, (_, i) => addMonths(ym, i - 5)).map((m) => ({ label: monthLabel(m, true), value: monthTotals(m).spent, highlight: m === ym }));
 
-  return `${syncBar()}${checkingCard()}${spendingMeterHTML()}${askCard()}${alertsCard()}
+  return `${syncBar()}${checkingCard()}${spendingMeterHTML()}${(() => {
+    const open = !!state.ui.upcomingOpen, total = upcoming.reduce((s, u) => s + u.r.amount, 0);
+    return `<div class="card">
+      <button class="meter-head" data-upcomingtoggle aria-expanded="${open}">
+        <div class="spread"><span class="muted small">📅 Upcoming bills · next 10 days</span><span class="chev ${open ? 'open' : ''}" aria-hidden="true">›</span></div>
+        <div class="spread" style="align-items:baseline;margin-top:2px">${upcoming.length
+          ? `<span class="mid">${money(total)}</span><span class="small muted">${upcoming.length} bill${upcoming.length === 1 ? '' : 's'} · next: ${esc(upcoming[0].r.name)} ${esc(dayLabel(upcoming[0].d))}</span>`
+          : '<span class="small muted">Nothing due in the next 10 days.</span>'}</div>
+      </button>
+      ${open && upcoming.length ? `<ul class="list" style="margin-top:6px">${upcoming.map(({ r, d }) => `<li data-rec="${r.id}" data-date="${d}"><div class="emoji">${esc(r.emoji)}</div><div class="grow"><div class="title">${esc(r.name)}</div><div class="sub">${esc(dayLabel(d))}</div></div><div class="num">${money(r.amount)}</div></li>`).join('')}</ul>
+        <button class="link" data-goto="recurring" style="margin-top:6px">All bills ›</button>` : ''}
+    </div>`;
+  })()}${askCard()}${alertsCard()}
   <div class="card"><h2>Spent in ${esc(monthLabel(ym, true))} <button class="link" data-goto="budgets">Budgets</button></h2>
     <div class="hero">
       <div class="ring-wrap">${ring(budget ? spent / budget : 0, budget && spent > budget ? 'var(--bad)' : budget && spent > pace ? 'var(--warn)' : 'var(--accent)')}
@@ -946,10 +958,7 @@ function viewHome() {
 
   ${state.accounts.length ? '' : `<div class="card"><h2>Accounts</h2><p class="muted small">Add your accounts to see your balances here.</p><button class="btn secondary small" data-a="addacct">Add account</button></div>`}
 
-  <div class="card"><h2>Upcoming <button class="link" data-goto="recurring">All recurring</button></h2>
-    ${upcoming.length ? `<ul class="list">${upcoming.map(({ r, d }) => `<li data-rec="${r.id}" data-date="${d}"><div class="emoji">${esc(r.emoji)}</div><div class="grow"><div class="title">${esc(r.name)}</div><div class="sub">${esc(dayLabel(d))}</div></div><div class="num">${money(r.amount)}</div></li>`).join('')}</ul>`
-      : '<p class="muted small">Nothing due in the next 10 days.</p>'}
-  </div>
+
 
   <div class="card"><h2>Where it went</h2>
     ${top.length ? `<div class="hero"><div>${donut(top)}</div><ul class="list grow" style="font-size:13px">${top.map((t) => `<li style="padding:6px 0;cursor:default"><i style="width:9px;height:9px;border-radius:3px;background:${t.color};flex:none"></i><span class="grow ellipsis">${esc(t.c.emoji)} ${esc(t.c.name)}</span><span class="num">${money(t.value, true)}</span></li>`).join('')}</ul></div>`

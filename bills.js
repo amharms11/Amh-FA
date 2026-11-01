@@ -816,6 +816,7 @@ function openPasteBills() {
 }
 
 function handleBillsClick(e) {
+  if (e.target.closest('[data-upcomingtoggle]')) { state.ui.upcomingOpen = !state.ui.upcomingOpen; save(); render(); return true; }
   if (e.target.closest('[data-paidtoggle]')) { state.ui.paidOpen = !state.ui.paidOpen; save(); render(); return true; }
   if (e.target.closest('[data-monthtoggle]')) { state.ui.monthClosed = !state.ui.monthClosed; save(); render(); return true; }
   if (e.target.closest('[data-metertoggle]')) { state.ui.meterOpen = !state.ui.meterOpen; save(); render(); return true; }
