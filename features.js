@@ -397,8 +397,8 @@ function handleFeatureClick(e) {
   if ((n = el('[data-dismiss]'))) { (state.dismissed ||= {})[n.dataset.dismiss] = 1; save(); render(); return true; }
   if ((n = el('[data-rrange]'))) { state.ui.report.range = n.dataset.rrange; save(); render(); return true; }
   if ((n = el('[data-rgroup]'))) { state.ui.report.group = n.dataset.rgroup; save(); render(); return true; }
-  if ((n = el('[data-rcat]'))) { state.ui.txFilter = 'c:' + n.dataset.rcat; state.ui.txQuery = ''; goto('tx'); return true; }
-  if ((n = el('[data-rq]'))) { state.ui.txFilter = 'all'; state.ui.txQuery = n.dataset.rq; goto('tx'); return true; }
+  if ((n = el('[data-rcat]'))) { state.ui.txView = 'main'; state.ui.txFilter = 'c:' + n.dataset.rcat; state.ui.txQuery = ''; goto('tx'); return true; }
+  if ((n = el('[data-rq]'))) { state.ui.txView = 'main'; state.ui.txFilter = 'all'; state.ui.txQuery = n.dataset.rq; goto('tx'); return true; }
   if ((n = el('[data-a="rptcsv"]'))) { reportCSV(); return true; }
   return false;
 }

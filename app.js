@@ -974,11 +974,17 @@ function viewHome() {
   </div>`;
 }
 
+/** Money moved between your own accounts or paid to a card/person — not spending or income. */
+const isTransferTx = (t) => isOwnMove(t.payee) || parts(t).every((p) => cat(p.categoryId).kind === 'transfer');
 function viewTx() {
+  const view = state.ui.txView === 'transfers' ? 'transfers' : 'main';
   const q = state.ui.txQuery.toLowerCase();
-  const f = state.ui.txFilter;
-  let list = [...state.transactions].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
-  if (f === 'uncat') list = list.filter((t) => !t.categoryId || cat(t.categoryId).name === 'Other');
+  const f = view === 'transfers' ? (state.ui.txFilterT || 'all') : state.ui.txFilter;
+  let list = [...state.transactions].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))
+    .filter((t) => (view === 'transfers') === isTransferTx(t));
+  if (f === 'tout') list = list.filter((t) => t.amount < 0);
+  else if (f === 'tin') list = list.filter((t) => t.amount > 0);
+  else if (f === 'uncat') list = list.filter((t) => !t.categoryId || cat(t.categoryId).name === 'Other');
   else if (f === 'income') list = list.filter((t) => t.amount > 0 && cat(t.categoryId).kind !== 'transfer');
   else if (f === 'out') list = list.filter((t) => t.amount < 0 && cat(t.categoryId).kind !== 'transfer');
   else if (f === 'pending') list = list.filter((t) => t.pending);
@@ -989,13 +995,23 @@ function viewTx() {
   const groups = {};
   shown.forEach((t) => (groups[t.date] ||= []).push(t));
   const total = list.reduce((s, t) => s + t.amount, 0);
-  const chips = [['all', 'All'], ['out', 'Purchases'], ['income', 'Deposits'], ['uncat', 'Needs review'],
-    ...(state.transactions.some((t) => t.pending) ? [['pending', 'Pending']] : []),
-    ...state.accounts.map((a) => ['a:' + a.id, a.name]), ...expenseCats().map((c) => ['c:' + c.id, `${c.emoji} ${c.name}`])];
+  const chips = view === 'transfers'
+    ? [['all', 'All'], ['tout', 'Money out'], ['tin', 'Money in'], ...state.accounts.map((a) => ['a:' + a.id, a.name])]
+    : [['all', 'All'], ['out', 'Purchases'], ['income', 'Deposits'], ['uncat', 'Needs review'],
+      ...(state.transactions.some((t) => t.pending) ? [['pending', 'Pending']] : []),
+      ...state.accounts.map((a) => ['a:' + a.id, a.name]), ...expenseCats().map((c) => ['c:' + c.id, `${c.emoji} ${c.name}`])];
+  const tCount = state.transactions.filter(isTransferTx).length;
+  const outT = round2(-list.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0)), inT = round2(list.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0));
   return `
-    <input class="search" type="search" placeholder="Search payee, note, category, amount" value="${esc(state.ui.txQuery)}" data-search>
+    <div class="segmented" style="margin-bottom:10px">
+      <button data-txview="main" class="${view === 'main' ? 'on' : ''}">Spending & income</button>
+      <button data-txview="transfers" class="${view === 'transfers' ? 'on' : ''}">↔️ Transfers${tCount ? ` (${tCount})` : ''}</button></div>
+    <input class="search" type="search" placeholder="${view === 'transfers' ? 'Search transfers' : 'Search payee, note, category, amount'}" value="${esc(state.ui.txQuery)}" data-search>
     <div class="chips">${chips.map(([v, l]) => `<button class="chip ${f === v ? 'on' : ''}" data-filter="${esc(v)}">${esc(l)}</button>`).join('')}</div>
-    <div class="spread small muted" style="margin:10px 4px 0"><span>${list.length} transactions</span><span class="num">Net ${signed(round2(total))}</span></div>
+    <div class="spread small muted" style="margin:10px 4px 0">${view === 'transfers'
+      ? `<span>${list.length} transfer${list.length === 1 ? '' : 's'}</span><span class="num">out ${money(outT)} · in ${money(inT)}</span>`
+      : `<span>${list.length} transactions</span><span class="num">Net ${signed(round2(total))}</span>`}</div>
+    ${view === 'transfers' ? '<p class="small muted" style="margin:6px 4px 0">Card payments, vault moves, transfers between your accounts and payments to people. These aren’t counted as spending or income.</p>' : ''}
     <div style="margin-top:8px">${syncBar()}</div>
     ${shown.length ? Object.entries(groups).map(([d, ts]) => `<div class="date-head">${esc(dayLabel(d))}</div><ul class="list card" style="padding:2px 14px">${ts.map(txRow).join('')}</ul>`).join('')
       : '<div class="empty"><div class="e">🔍</div>No matching transactions.</div>'}
@@ -1153,7 +1169,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if ((n = el('[data-acct]'))) return accountForm(acct(n.dataset.acct));
     if ((n = el('[data-cat]'))) return budgetForm(state.categories.find((c) => c.id === n.dataset.cat));
     if ((n = el('[data-goal]'))) return goalForm(state.goals.find((g) => g.id === n.dataset.goal));
-    if ((n = el('[data-filter]'))) { state.ui.txFilter = n.dataset.filter; return render(); }
+    if ((n = el('[data-txview]'))) { state.ui.txView = n.dataset.txview; state.ui.txQuery = ''; return render(); }
+    if ((n = el('[data-filter]'))) { if (state.ui.txView === 'transfers') state.ui.txFilterT = n.dataset.filter; else state.ui.txFilter = n.dataset.filter; return render(); }
     if ((n = el('[data-month]'))) { state.ui.month = addMonths(state.ui.month, +n.dataset.month); return render(); }
     if ((n = el('[data-range] button'))) { state.ui.nwRange = +n.dataset.v; save(); return render(); }
     if ((n = el('[data-goto]'))) return goto(n.dataset.goto);
